@@ -158,11 +158,14 @@ async function runScan(rawUrl) {
   renderScanning();
 
   const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: rawUrl }),
+      signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
     // Let the scanning animation breathe for a beat so it doesn't flash.
@@ -177,12 +180,17 @@ async function runScan(rawUrl) {
       return;
     }
     renderResult(data);
-  } catch {
+  } catch (err) {
     stopScanning();
     resultEl.hidden = true;
     resultEl.replaceChildren();
-    showError("Network hiccup — please try again in a moment.");
+    showError(
+      err && err.name === "AbortError"
+        ? "That took too long — the store may be slow. Try again."
+        : "Network hiccup — please try again in a moment.",
+    );
   } finally {
+    clearTimeout(timeout);
     button.disabled = false;
     button.textContent = "Scan my store";
   }

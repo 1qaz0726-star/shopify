@@ -17,7 +17,19 @@
       "Read(//c/Users/User/AppData/Roaming/npm/**)",
       "Bash(codex exec *)",
       "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"https://httpbin.org/redirect-to?url=http://169.254.169.254/latest/meta-data/\"}' --max-time 25)",
-      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://gymshark.com\"}' --max-time 25)"
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://gymshark.com\"}' --max-time 25)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://localtest.me\"}' --max-time 15)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://[::ffff:7f00:1]\"}' --max-time 15)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://[64:ff9b::7f00:1]\"}' --max-time 15)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://allbirds.com:8080\"}' --max-time 10)",
+      "Bash(node --check scanner.js)",
+      "Bash(node --check server.js)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(TRUST_PROXY=1 node server.js)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"allbirds.com\"}' --max-time 25)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://[fe90::1]\"}' --max-time 10)",
+      "Bash(curl -s -X POST localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://gymshark.com\"}' --max-time 25)",
+      "Bash(curl -s localhost:3000/api/health)"
     ]
   }
 }
