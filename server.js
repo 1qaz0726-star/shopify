@@ -11,6 +11,19 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.disable('x-powered-by');
+// Behind a known proxy/CDN set TRUST_PROXY so req.ip reflects the real client.
+// Accept a hop count ("1"), a boolean ("true"/"false"), or a CIDR/preset list
+// ("loopback", "10.0.0.0/8"). Coerce numeric/boolean strings explicitly —
+// Express treats a bare string as a subnet list, not a hop count.
+if (process.env.TRUST_PROXY) {
+  const raw = process.env.TRUST_PROXY.trim();
+  let trust;
+  if (/^\d+$/.test(raw)) trust = Number(raw);
+  else if (raw === 'true') trust = true;
+  else if (raw === 'false') trust = false;
+  else trust = raw;
+  app.set('trust proxy', trust);
+}
 app.use(express.json({ limit: '8kb' }));
 
 // Baseline security headers.
@@ -42,7 +55,10 @@ const MAX_PER_WINDOW = 12;
 const hits = new Map();
 
 function rateLimit(req, res, next) {
-  const ip = (req.headers['x-forwarded-for']?.split(',')[0] || req.ip || 'unknown').trim();
+  // Use req.ip only. X-Forwarded-For is attacker-controlled unless a trusted
+  // proxy is configured; in production set TRUST_PROXY and Express will derive
+  // req.ip from XFF safely.
+  const ip = req.ip || 'unknown';
   const now = Date.now();
   const entry = hits.get(ip);
   if (!entry || now - entry.start > WINDOW_MS) {
@@ -64,11 +80,21 @@ setInterval(() => {
   }
 }, WINDOW_MS).unref();
 
+// Global concurrency cap. Each scan makes an outbound fetch, so without a
+// ceiling a flood of requests (even across spoofed IPs) could turn this into an
+// outbound-scanning proxy / exhaust sockets. Excess requests are shed with 503.
+const MAX_CONCURRENT_SCANS = 6;
+let activeScans = 0;
+
 app.post('/api/scan', rateLimit, async (req, res) => {
   const { url } = req.body || {};
   if (typeof url !== 'string') {
     return res.status(400).json({ error: 'Please enter a store URL.' });
   }
+  if (activeScans >= MAX_CONCURRENT_SCANS) {
+    return res.status(503).json({ error: 'We are scanning a lot of stores right now — try again in a moment.' });
+  }
+  activeScans += 1;
   try {
     const result = await scanStore(url);
     res.json(result);
@@ -78,6 +104,8 @@ app.post('/api/scan', rateLimit, async (req, res) => {
     }
     console.error('Unexpected scan error:', err);
     res.status(500).json({ error: 'Something went wrong on our side. Please try again.' });
+  } finally {
+    activeScans -= 1;
   }
 });
 

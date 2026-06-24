@@ -1,12 +1,15 @@
 // scanner.js — compliance scan engine for Shopify storefronts.
-// Fetches a storefront's HTML and statically detects (a) tracking technologies
-// that typically fire on page load and (b) whether a consent-management layer
-// is present. The verdict flags the common GDPR failure mode: trackers firing
-// before the visitor has consented.
+// Performs a STATIC scan of a storefront's HTML: it detects (a) tracking
+// technologies embedded on the page and (b) whether a consent-management layer
+// is present. It flags the common GDPR failure mode — trackers embedded with no
+// consent layer gating them. Because this is static (no JS execution), it
+// reports what is *embedded*, not proven runtime execution order; the verdict
+// copy and report say so explicitly.
 
 import * as cheerio from 'cheerio';
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { Agent } from 'undici';
 
 const FETCH_TIMEOUT_MS = 12000;
 const MAX_BYTES = 2_500_000; // 2.5 MB cap on the downloaded document
@@ -32,15 +35,18 @@ const TRACKERS = [
 ];
 
 // --- Consent-management platform (CMP) signatures -------------------------
+// Matched against script src / link href hosts and known init globals only —
+// NOT bare brand words anywhere in the HTML, which a competitor mention or blog
+// post could trivially spoof into a false "consent layer present".
 const CMPS = [
-  { key: 'onetrust', name: 'OneTrust', patterns: [/cdn\.cookielaw\.org/i, /otSDKStub/i, /optanon/i] },
-  { key: 'cookiebot', name: 'Cookiebot', patterns: [/consent\.cookiebot\.com/i, /\bCookiebot\b/] },
-  { key: 'cookieyes', name: 'CookieYes', patterns: [/cdn-cookieyes\.com/i, /cookieyes/i] },
-  { key: 'termly', name: 'Termly', patterns: [/app\.termly\.io/i, /termly/i] },
-  { key: 'iubenda', name: 'iubenda', patterns: [/cdn\.iubenda\.com/i, /iubenda/i] },
-  { key: 'osano', name: 'Osano', patterns: [/cmp\.osano\.com/i, /\bosano\b/i] },
-  { key: 'complianz', name: 'Complianz', patterns: [/complianz/i] },
-  { key: 'pandectes', name: 'Pandectes GDPR', patterns: [/pandectes/i] },
+  { key: 'onetrust', name: 'OneTrust', patterns: [/cdn\.cookielaw\.org/i, /otSDKStub/i, /\bOptanon[A-Z]/] },
+  { key: 'cookiebot', name: 'Cookiebot', patterns: [/consent\.cookiebot\.com/i] },
+  { key: 'cookieyes', name: 'CookieYes', patterns: [/cdn-cookieyes\.com/i] },
+  { key: 'termly', name: 'Termly', patterns: [/app\.termly\.io/i] },
+  { key: 'iubenda', name: 'iubenda', patterns: [/cdn\.iubenda\.com/i] },
+  { key: 'osano', name: 'Osano', patterns: [/cmp\.osano\.com/i] },
+  { key: 'complianz', name: 'Complianz', patterns: [/complianz-gdpr/i, /cmplz_/i] },
+  { key: 'pandectes', name: 'Pandectes GDPR', patterns: [/pandectes\.io/i, /cdn\.pandectes/i] },
   {
     key: 'shopify-native',
     name: 'Shopify Customer Privacy banner',
@@ -82,13 +88,25 @@ function isBlockedIp(ip) {
     return false;
   }
   if (net.isIPv6(ip)) {
-    const lower = ip.toLowerCase();
+    const lower = ip.toLowerCase().split('%')[0]; // strip zone id
     if (lower === '::1' || lower === '::') return true;
-    if (lower.startsWith('fe80')) return true; // link-local
+    if (/^fe[89ab]/.test(lower)) return true; // link-local fe80::/10 (fe80–febf)
     if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
-    // IPv4-mapped (::ffff:a.b.c.d) — re-check the embedded v4 address.
-    const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isBlockedIp(mapped[1]);
+    if (lower.startsWith('ff')) return true; // multicast
+    if (lower.startsWith('64:ff9b')) return true; // NAT64 (well-known prefix)
+    // IPv4-mapped / -embedded: ::ffff:a.b.c.d (dotted) or ::ffff:7f00:1 (hex).
+    const mapped = lower.match(/::ffff:(.+)$/);
+    if (mapped) {
+      const tail = mapped[1];
+      if (tail.includes('.')) return isBlockedIp(tail);
+      const groups = tail.split(':');
+      if (groups.length <= 2 && groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
+        const hex = groups.map((g) => g.padStart(4, '0')).join('').padStart(8, '0');
+        const v4 = [0, 2, 4, 6].map((i) => parseInt(hex.slice(i, i + 2), 16)).join('.');
+        return isBlockedIp(v4);
+      }
+      return true; // unrecognised embedded form -> block
+    }
     return false;
   }
   return true; // unknown format -> block
@@ -116,10 +134,14 @@ async function assertPublicHost(hostname) {
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
 
-// Validate scheme + port on a parsed URL. Throws ScanError if unsafe.
+// Validate scheme + credentials + port on a parsed URL. Throws ScanError if
+// unsafe. Applied to the initial URL AND every redirect target.
 function assertSafeScheme(parsed) {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new ScanError('Only http and https addresses can be scanned.', 400);
+  }
+  if (parsed.username || parsed.password) {
+    throw new ScanError('Remove the username/password from the URL and try again.', 400);
   }
   if (parsed.port && !['', '80', '443'].includes(parsed.port)) {
     throw new ScanError('Only standard web ports (80/443) can be scanned.', 400);
@@ -137,67 +159,134 @@ async function readCappedBody(res) {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    received += value.length;
-    if (received > MAX_BYTES) {
+    const remaining = MAX_BYTES - received;
+    if (value.length >= remaining) {
+      // Keep exactly up to the cap from the final chunk, then stop — previously
+      // the whole overflowing chunk was discarded, truncating well under MAX.
+      chunks.push(value.subarray(0, remaining));
       try { await reader.cancel(); } catch { /* ignore */ }
       break;
     }
     chunks.push(value);
+    received += value.length;
   }
   return Buffer.concat(chunks).toString('utf8');
 }
 
+// An undici dispatcher whose DNS resolution IS the SSRF check: the address we
+// validate is the exact address the socket connects to. This closes the
+// DNS-rebinding (TOCTOU) gap between a separate lookup() and the real
+// connection, where a domain could resolve "public" during validation and
+// "127.0.0.1" at connect time.
+function createGuardedAgent() {
+  return new Agent({
+    connect: {
+      lookup(hostname, options, callback) {
+        dns
+          .lookup(hostname, { all: true })
+          .then((records) => {
+            if (!records.length) {
+              callback(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' }));
+              return;
+            }
+            for (const r of records) {
+              if (isBlockedIp(r.address)) {
+                callback(Object.assign(new Error('Blocked private address'), { code: 'EBLOCKEDADDR' }));
+                return;
+              }
+            }
+            if (options && options.all) {
+              callback(null, records);
+            } else {
+              callback(null, records[0].address, records[0].family);
+            }
+          })
+          .catch((err) => callback(err));
+      },
+    },
+  });
+}
+
+function isBlockedConnectError(err) {
+  let e = err;
+  for (let i = 0; i < 5 && e; i++) {
+    if (e.code === 'EBLOCKEDADDR') return true;
+    e = e.cause;
+  }
+  return false;
+}
+
 // Fetch the document following redirects MANUALLY, re-validating every hop.
-// This is the SSRF defence: with redirect:'follow', undici would transparently
-// follow a 302 into an internal IP before we ever saw it. By handling redirects
-// ourselves we re-run assertPublicHost on each Location before requesting it.
+// Defence in depth: the guarded dispatcher pins/validates the connect IP, and
+// we also re-check each redirect target's host before following it.
 async function fetchDocument(startUrl) {
   let current = startUrl; // caller has already validated the first hop's host
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    let res;
-    try {
-      res = await fetch(current.toString(), {
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
-      });
-    } catch (err) {
-      if (err?.name === 'AbortError') throw new ScanError('The store took too long to respond.', 504);
-      throw new ScanError('We could not reach that store. It may be password-protected or offline.', 502);
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (REDIRECT_STATUSES.has(res.status)) {
-      const location = res.headers.get('location');
-      if (!location) throw new ScanError('The store sent a broken redirect.', 502);
-      let next;
+  const agent = createGuardedAgent();
+  try {
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       try {
-        next = new URL(location, current);
-      } catch {
-        throw new ScanError('The store redirected to an invalid address.', 502);
+        let res;
+        try {
+          res = await fetch(current.toString(), {
+            redirect: 'manual',
+            signal: controller.signal,
+            dispatcher: agent,
+            headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+          });
+        } catch (err) {
+          if (err?.name === 'AbortError') throw new ScanError('The store took too long to respond.', 504);
+          if (isBlockedConnectError(err)) throw new ScanError('Internal or local addresses cannot be scanned.', 400);
+          throw new ScanError('We could not reach that store. It may be password-protected or offline.', 502);
+        }
+
+        if (REDIRECT_STATUSES.has(res.status)) {
+          await res.body?.cancel().catch(() => {});
+          const location = res.headers.get('location');
+          if (!location) throw new ScanError('The store sent a broken redirect.', 502);
+          let next;
+          try {
+            next = new URL(location, current);
+          } catch {
+            throw new ScanError('The store redirected to an invalid address.', 502);
+          }
+          assertSafeScheme(next);
+          await assertPublicHost(next.hostname); // re-validate BEFORE following
+          current = next;
+          continue;
+        }
+
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          throw new ScanError(`The store responded with status ${res.status}.`, 502);
+        }
+
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType && !/text\/html|application\/xhtml/i.test(contentType)) {
+          await res.body?.cancel().catch(() => {});
+          throw new ScanError('That address did not return a web page.', 415);
+        }
+
+        // Body read stays inside the timer scope, so the timeout covers the
+        // full download — not just the response headers (slowloris defence).
+        // A timeout here aborts the stream; map that to 504 rather than 500.
+        let html;
+        try {
+          html = await readCappedBody(res);
+        } catch (err) {
+          if (err?.name === 'AbortError') throw new ScanError('The store took too long to respond.', 504);
+          throw new ScanError('We could not finish reading that store.', 502);
+        }
+        return { html, finalUrl: current.toString() };
+      } finally {
+        clearTimeout(timer);
       }
-      assertSafeScheme(next);
-      await assertPublicHost(next.hostname); // re-validate BEFORE following
-      current = next;
-      continue;
     }
-
-    if (!res.ok) throw new ScanError(`The store responded with status ${res.status}.`, 502);
-
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType && !/text\/html|application\/xhtml/i.test(contentType)) {
-      throw new ScanError('That address did not return a web page.', 415);
-    }
-
-    const html = await readCappedBody(res);
-    return { html, finalUrl: current.toString() };
+    throw new ScanError('That store redirects too many times.', 502);
+  } finally {
+    await agent.close().catch(() => {});
   }
-
-  throw new ScanError('That store redirects too many times.', 502);
 }
 
 function collectHaystack(html) {
@@ -239,11 +328,13 @@ function buildVerdict(trackers, cmps, isShopify) {
     score = Math.max(8, 46 - (trackers.length - 1) * 8);
     findings.push({
       severity: 'critical',
-      title: 'Tracking scripts load with no consent banner',
+      title: 'Trackers embedded, and no consent layer detected',
       detail:
-        `We detected ${trackers.length} tracking technolog${trackers.length === 1 ? 'y' : 'ies'} ` +
-        'but no consent-management layer. Under GDPR/ePrivacy these scripts must not run ' +
-        'until an EU visitor opts in. As loaded, they fire on page open.',
+        `We found ${trackers.length} tracking technolog${trackers.length === 1 ? 'y' : 'ies'} ` +
+        'embedded on the page and did not detect a known consent-management layer. Under ' +
+        'GDPR/ePrivacy these must not run until an EU visitor opts in. If nothing is gating them, ' +
+        'they likely load before consent — confirm with a runtime check. (A custom/uncommon ' +
+        'consent tool may not be recognised by this static scan.)',
     });
   } else if (trackers.length > 0 && cmps.length > 0) {
     level = 'warning';
@@ -261,9 +352,9 @@ function buildVerdict(trackers, cmps, isShopify) {
     score = 92;
     findings.push({
       severity: 'good',
-      title: 'No common tracking pixels detected on load',
+      title: 'No common tracking pixels detected on the homepage',
       detail:
-        'We did not find the major advertising/analytics pixels firing on the homepage. ' +
+        'We did not find the major advertising/analytics pixels embedded on the homepage. ' +
         'Verify any tools loaded later in the funnel (checkout, account pages).',
     });
   }
@@ -284,6 +375,13 @@ function buildVerdict(trackers, cmps, isShopify) {
         'for Shopify storefronts.',
     });
   }
+  findings.push({
+    severity: 'info',
+    title: 'How we scanned this',
+    detail:
+      'This is a static scan of the homepage HTML — it detects what is embedded, not proven ' +
+      'runtime behaviour. It is informational, not legal advice.',
+  });
 
   return { score, level, findings };
 }
