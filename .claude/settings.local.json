@@ -5,7 +5,19 @@
       "Bash(npm --version)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(npm install *)",
+      "Bash(node server.js)",
+      "Bash(curl -s http://localhost:3000/api/health)",
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://localhost\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://192.168.1.1\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"allbirds.com\"}' --max-time 20)",
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"thisdomaindoesnotexist-xyz123.com\"}' --max-time 20)",
+      "Bash(command -v codex.cmd)",
+      "Read(//c/Users/User/AppData/Roaming/npm/**)",
+      "Bash(codex exec *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"https://httpbin.org/redirect-to?url=http://169.254.169.254/latest/meta-data/\"}' --max-time 25)",
+      "Bash(curl -s -X POST http://localhost:3000/api/scan -H \"Content-Type: application/json\" -d '{\"url\":\"http://gymshark.com\"}' --max-time 25)"
     ]
   }
 }

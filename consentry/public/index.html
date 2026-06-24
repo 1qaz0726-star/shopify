@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Consentry — Is your Shopify store leaking trackers before consent?</title>
+    <meta
+      name="description"
+      content="Free privacy scan for Shopify stores. See which tracking pixels fire before your visitors consent — and what it could cost you under GDPR."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-head">
+      <a class="brand" href="/" aria-label="Consentry home">
+        <svg class="brand__mark" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2 3 5.5v6c0 4.7 3.3 8.6 9 10.5 5.7-1.9 9-5.8 9-10.5v-6L12 2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+          <path d="m8.4 12 2.5 2.5L16 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="brand__word">Consentry</span>
+      </a>
+      <nav class="site-nav">
+        <a href="#how">How it works</a>
+        <a href="#why">Why it matters</a>
+        <a class="btn btn--ghost" href="#scan">Run a scan</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" id="scan">
+        <div class="hero__copy">
+          <p class="eyebrow">Privacy compliance · Shopify</p>
+          <h1>
+            Your store may be tracking visitors <em>before</em> they ever say yes.
+          </h1>
+          <p class="lede">
+            Most Shopify stores load Google, Meta and TikTok pixels the instant a page opens —
+            with no consent. In the EU that is the difference between a clean store and a fine.
+            Consentry checks yours in about ten seconds.
+          </p>
+
+          <form class="scan" id="scan-form" novalidate>
+            <div class="scan__field">
+              <label class="visually-hidden" for="store-url">Your store URL</label>
+              <span class="scan__scheme">https://</span>
+              <input
+                id="store-url"
+                name="url"
+                type="text"
+                inputmode="url"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="your-store.com"
+              />
+              <button class="btn btn--solid" type="submit" id="scan-btn">Scan my store</button>
+            </div>
+            <p class="scan__note">No login. No install. We never store your URL.</p>
+            <p class="scan__error" id="scan-error" role="alert" hidden></p>
+          </form>
+        </div>
+
+        <aside class="hero__panel" aria-hidden="true">
+          <div class="panel-card">
+            <div class="panel-card__top">
+              <span class="dot dot--r"></span><span class="dot dot--a"></span><span class="dot dot--g"></span>
+              <span class="panel-card__title">compliance report</span>
+            </div>
+            <div class="panel-card__body">
+              <div class="panel-row"><span>Consent banner</span><b class="t-bad">not found</b></div>
+              <div class="panel-row"><span>Meta Pixel</span><b class="t-bad">fires on load</b></div>
+              <div class="panel-row"><span>Google Analytics</span><b class="t-bad">fires on load</b></div>
+              <div class="panel-row"><span>TikTok Pixel</span><b class="t-warn">fires on load</b></div>
+              <div class="panel-row panel-row--score"><span>Compliance score</span><b>23<small>/100</small></b></div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <!-- Results render here -->
+      <section class="result" id="result" hidden aria-live="polite"></section>
+
+      <section class="strip" id="why">
+        <div class="strip__item">
+          <span class="strip__num">€20M</span>
+          <p>or 4% of global turnover — the GDPR ceiling for getting consent wrong.</p>
+        </div>
+        <div class="strip__item">
+          <span class="strip__num">60–80%</span>
+          <p>of a typical store's load time comes from third-party tracking scripts.</p>
+        </div>
+        <div class="strip__item">
+          <span class="strip__num">2 min</span>
+          <p>to fix it with our app once you've seen exactly what's wrong.</p>
+        </div>
+      </section>
+
+      <section class="how" id="how">
+        <p class="eyebrow eyebrow--center">How it works</p>
+        <h2>Three steps, no setup.</h2>
+        <ol class="steps">
+          <li>
+            <span class="steps__no">01</span>
+            <h3>Paste your URL</h3>
+            <p>We fetch your storefront the way a real browser does — nothing to install.</p>
+          </li>
+          <li>
+            <span class="steps__no">02</span>
+            <h3>We read the page</h3>
+            <p>Consentry detects the advertising and analytics pixels embedded on the page, and whether a consent layer actually gates them.</p>
+          </li>
+          <li>
+            <span class="steps__no">03</span>
+            <h3>You get the verdict</h3>
+            <p>A plain-English report: what's firing, what it risks, and what a compliant setup looks like.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="cta">
+        <div class="cta__inner">
+          <h2>Want it fixed automatically?</h2>
+          <p>
+            The Consentry app blocks trackers until consent, detects each visitor's region,
+            and stays out of your store's way. We're onboarding early stores now.
+          </p>
+          <form class="waitlist" id="waitlist-form" novalidate>
+            <input type="email" id="waitlist-email" placeholder="you@yourstore.com" autocomplete="email" />
+            <button class="btn btn--solid" type="submit">Get early access</button>
+          </form>
+          <p class="waitlist__msg" id="waitlist-msg" role="status" hidden></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <span>Consentry</span>
+      <span class="site-foot__fine">Informational scan, not legal advice. Built for Shopify merchants.</span>
+    </footer>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
