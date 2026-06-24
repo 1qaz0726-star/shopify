@@ -1,0 +1,15 @@
+{
+  "name": "consentry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Free cookie & tracking compliance scanner for Shopify stores (Phase 0 validation site).",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "express": "^4.21.2"
+  }
+}
