@@ -88,9 +88,8 @@ a { color: inherit; }
   align-items: center;
   justify-content: space-between;
 }
-.brand { display: inline-flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
-.brand__mark { color: var(--pine); }
-.brand__word { font-family: "Fraunces", serif; font-size: 1.32rem; font-weight: 600; letter-spacing: -0.02em; }
+.brand { display: inline-flex; align-items: center; text-decoration: none; }
+.brand__logo { height: 36px; width: auto; mix-blend-mode: multiply; }
 .site-nav { display: flex; align-items: center; gap: 1.8rem; }
 .site-nav a { text-decoration: none; color: var(--ink-soft); font-size: 0.95rem; }
 .site-nav a:hover { color: var(--ink); }
