@@ -124,7 +124,7 @@ function renderResult(data) {
   foot.appendChild(cta);
   report.appendChild(foot);
 
-  lastScan = { url: data.finalUrl || data.url || "", score: data.score };
+  lastScan = { url: data.finalUrl || data.url || "", score: data.score, findings: data.findings || [], trackers: data.trackers || [] };
   resultEl.appendChild(report);
   animateGauge(gauge, clampScore(data.score));
   resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -232,7 +232,7 @@ waitlistForm.addEventListener("submit", async (e) => {
     await fetch("/api/waitlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, url: lastScan?.url, score: lastScan?.score }),
+      body: JSON.stringify({ email, url: lastScan?.url, score: lastScan?.score, findings: lastScan?.findings, trackers: lastScan?.trackers }),
     });
   } catch (_) {}
   waitlistMsg.textContent = "Got it — we'll email you within 48h.";
