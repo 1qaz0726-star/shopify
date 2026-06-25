@@ -2,6 +2,8 @@
 // All user-derived strings are rendered via textContent (never innerHTML) to
 // keep the report XSS-safe.
 
+let lastScan = null;
+
 const form = document.getElementById("scan-form");
 const input = document.getElementById("store-url");
 const button = document.getElementById("scan-btn");
@@ -89,7 +91,9 @@ function renderResult(data) {
   const head = el("div", "report__head");
   const gauge = el("div", "gauge");
   gauge.style.setProperty("--gauge-color", GAUGE_COLOR[data.level] || GAUGE_COLOR.warning);
-  gauge.append(el("span", "gauge__num", "0"), el("span", "gauge__den", "/ 100"));
+  const gaugeLabel = el("div", "gauge__label");
+  gaugeLabel.append(el("span", "gauge__num", "0"), el("span", "gauge__den", "/ 100"));
+  gauge.appendChild(gaugeLabel);
   head.appendChild(gauge);
 
   const verdict = el("div", "report__verdict");
@@ -115,11 +119,12 @@ function renderResult(data) {
   // Foot: CTA to the app
   const foot = el("div", "report__foot");
   foot.appendChild(el("p", null, footMessage(data)));
-  const cta = el("a", "btn btn--solid", "Fix this automatically");
+  const cta = el("a", "btn btn--solid", "Get notified when the fix is ready");
   cta.href = "#waitlist-form";
   foot.appendChild(cta);
   report.appendChild(foot);
 
+  lastScan = { url: data.finalUrl || data.url || "", score: data.score };
   resultEl.appendChild(report);
   animateGauge(gauge, clampScore(data.score));
   resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -212,7 +217,7 @@ const waitlistForm = document.getElementById("waitlist-form");
 const waitlistEmail = document.getElementById("waitlist-email");
 const waitlistMsg = document.getElementById("waitlist-msg");
 
-waitlistForm.addEventListener("submit", (e) => {
+waitlistForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = waitlistEmail.value.trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
@@ -220,8 +225,16 @@ waitlistForm.addEventListener("submit", (e) => {
     waitlistMsg.textContent = "That email doesn't look right — mind checking it?";
     return;
   }
-  waitlistMsg.hidden = false;
-  waitlistMsg.textContent = "You're on the list. We'll be in touch when your spot opens.";
-  waitlistEmail.value = "";
   waitlistEmail.disabled = true;
+  waitlistMsg.hidden = false;
+  waitlistMsg.textContent = "Saving…";
+  try {
+    await fetch("/api/waitlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, url: lastScan?.url, score: lastScan?.score }),
+    });
+  } catch (_) {}
+  waitlistMsg.textContent = "Got it — we'll email you within 48h.";
+  waitlistEmail.value = "";
 });
