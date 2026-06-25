@@ -89,7 +89,7 @@ a { color: inherit; }
   justify-content: space-between;
 }
 .brand { display: inline-flex; align-items: center; text-decoration: none; }
-.brand__logo { height: 36px; width: auto; mix-blend-mode: multiply; }
+.brand__logo { height: 56px; width: auto; mix-blend-mode: multiply; }
 .site-nav { display: flex; align-items: center; gap: 1.8rem; }
 .site-nav a { text-decoration: none; color: var(--ink-soft); font-size: 0.95rem; }
 .site-nav a:hover { color: var(--ink); }
