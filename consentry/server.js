@@ -4,7 +4,11 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Resend } from 'resend';
 import { scanStore, ScanError } from './scanner.js';
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || '1qaz0726@gmail.com';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -107,6 +111,32 @@ app.post('/api/scan', rateLimit, async (req, res) => {
   } finally {
     activeScans -= 1;
   }
+});
+
+app.post('/api/waitlist', async (req, res) => {
+  const { email, url, score } = req.body || {};
+  if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+    return res.status(400).json({ error: 'Invalid email.' });
+  }
+  const safeEmail = email.trim().slice(0, 200);
+  const safeUrl = typeof url === 'string' ? url.trim().slice(0, 500) : 'unknown';
+  const safeScore = Number.isFinite(Number(score)) ? Math.round(Number(score)) : '?';
+
+  if (resend) {
+    try {
+      await resend.emails.send({
+        from: 'Consentry <onboarding@resend.dev>',
+        to: NOTIFY_EMAIL,
+        subject: `New lead — ${safeEmail} (score ${safeScore}/100)`,
+        text: `New waitlist signup:\n\nEmail: ${safeEmail}\nScanned: ${safeUrl}\nScore: ${safeScore}/100\n`,
+      });
+    } catch (err) {
+      console.error('Resend error:', err.message);
+    }
+  } else {
+    console.log(`[waitlist] ${safeEmail} | ${safeUrl} | score ${safeScore}`);
+  }
+  res.json({ ok: true });
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
