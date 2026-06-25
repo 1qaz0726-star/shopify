@@ -114,7 +114,7 @@ app.post('/api/scan', rateLimit, async (req, res) => {
 });
 
 app.post('/api/waitlist', async (req, res) => {
-  const { email, url, score } = req.body || {};
+  const { email, url, score, findings, trackers } = req.body || {};
   if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
     return res.status(400).json({ error: 'Invalid email.' });
   }
@@ -122,19 +122,37 @@ app.post('/api/waitlist', async (req, res) => {
   const safeUrl = typeof url === 'string' ? url.trim().slice(0, 500) : 'unknown';
   const safeScore = Number.isFinite(Number(score)) ? Math.round(Number(score)) : '?';
 
+  const trackerNames = Array.isArray(trackers)
+    ? trackers.map((t) => (typeof t === 'object' ? t.name : String(t))).filter(Boolean).join(', ')
+    : '';
+  const findingLines = Array.isArray(findings)
+    ? findings
+        .filter((f) => f.severity === 'critical' || f.severity === 'warning')
+        .map((f) => `  [${f.severity.toUpperCase()}] ${f.title}`)
+        .join('\n')
+    : '';
+
+  const body =
+    `New waitlist signup:\n\n` +
+    `Email:    ${safeEmail}\n` +
+    `Scanned:  ${safeUrl}\n` +
+    `Score:    ${safeScore}/100\n` +
+    (trackerNames ? `Trackers: ${trackerNames}\n` : '') +
+    (findingLines ? `\nIssues found:\n${findingLines}\n` : '');
+
   if (resend) {
     try {
       await resend.emails.send({
         from: 'Consentry <onboarding@resend.dev>',
         to: NOTIFY_EMAIL,
         subject: `New lead — ${safeEmail} (score ${safeScore}/100)`,
-        text: `New waitlist signup:\n\nEmail: ${safeEmail}\nScanned: ${safeUrl}\nScore: ${safeScore}/100\n`,
+        text: body,
       });
     } catch (err) {
       console.error('Resend error:', err.message);
     }
   } else {
-    console.log(`[waitlist] ${safeEmail} | ${safeUrl} | score ${safeScore}`);
+    console.log(`[waitlist]\n${body}`);
   }
   res.json({ ok: true });
 });
