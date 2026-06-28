@@ -2,3 +2,5 @@ node_modules/
 npm-debug.log*
 .env
 .DS_Store
+consentry-scans.json
+consentry-scans.json.tmp

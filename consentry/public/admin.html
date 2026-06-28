@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Consentry Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper:      #f6f2e9;
+        --paper-2:    #efeadd;
+        --card:       #fcfaf4;
+        --ink:        #1c1b16;
+        --ink-soft:   #56544a;
+        --ink-faint:  #8d8a7c;
+        --line:       #ddd6c4;
+        --pine:       #2c5446;
+        --pine-deep:  #1f3d33;
+        --bad:        #b23a2e;
+        --warn:       #b9802a;
+        --good:       #2f6b4f;
+        --radius:     10px;
+        --mono:       "IBM Plex Mono", "Courier New", monospace;
+        --ease:       cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: "IBM Plex Sans", -apple-system, system-ui, sans-serif;
+        font-size: 15px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── Layout ─────────────────────────────────────── */
+      .admin-wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 1.5rem 4rem;
+      }
+
+      /* ── Header ─────────────────────────────────────── */
+      .admin-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.4rem 0 1.2rem;
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 2.4rem;
+      }
+      .admin-head__brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        text-decoration: none;
+        color: inherit;
+      }
+      .admin-head__logo { height: 40px; width: auto; mix-blend-mode: multiply; }
+      .admin-head__tag {
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--pine);
+        background: #d9f0e4;
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+      }
+      .admin-head__logout {
+        font: inherit;
+        font-size: 0.88rem;
+        color: var(--ink-soft);
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.38rem 0.9rem;
+        cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .admin-head__logout:hover { border-color: var(--ink); color: var(--ink); }
+
+      /* ── Section title ──────────────────────────────── */
+      .section-label {
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--pine);
+        margin: 0 0 0.8rem;
+      }
+
+      /* ── Scan input card ─────────────────────────────── */
+      .scan-card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 1.4rem 1.6rem;
+        margin-bottom: 2rem;
+      }
+      .scan-card__header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 0.9rem;
+      }
+      .scan-card__title {
+        font-family: "Fraunces", Georgia, serif;
+        font-size: 1.35rem;
+        font-weight: 500;
+        margin: 0;
+        letter-spacing: -0.01em;
+      }
+      .scan-card__hint {
+        font-size: 0.82rem;
+        color: var(--ink-faint);
+        font-family: var(--mono);
+      }
+      .scan-card textarea {
+        width: 100%;
+        min-height: 96px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.65rem 0.9rem;
+        font: 0.88rem/1.55 var(--mono);
+        color: var(--ink);
+        resize: vertical;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .scan-card textarea:focus { border-color: var(--pine); }
+      .scan-card textarea::placeholder { color: var(--ink-faint); }
+      .scan-card__foot {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 0.75rem;
+      }
+      #scan-status {
+        font-size: 0.85rem;
+        color: var(--ink-soft);
+        font-family: var(--mono);
+      }
+
+      /* ── Buttons ─────────────────────────────────────── */
+      .btn-primary {
+        font: inherit;
+        font-weight: 600;
+        font-size: 0.9rem;
+        background: var(--pine);
+        color: var(--paper);
+        border: none;
+        border-radius: 999px;
+        padding: 0.5rem 1.2rem;
+        cursor: pointer;
+        transition: background 0.15s var(--ease), transform 0.12s;
+      }
+      .btn-primary:hover { background: var(--pine-deep); transform: translateY(-1px); }
+      .btn-primary:disabled { opacity: 0.5; cursor: progress; transform: none; }
+
+      .btn-sm {
+        font: inherit;
+        font-size: 0.78rem;
+        padding: 0.22rem 0.65rem;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: none;
+        color: var(--ink-soft);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+      }
+      .btn-sm:hover { border-color: var(--ink); color: var(--ink); }
+      .btn-sm--pine { border-color: var(--pine); color: var(--pine); }
+      .btn-sm--pine:hover { background: var(--pine); color: var(--paper); }
+      .btn-sm--danger:hover { border-color: var(--bad); color: var(--bad); }
+
+      /* ── Results table ──────────────────────────────── */
+      .results-section { margin-top: 0.5rem; }
+      .results-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.8rem;
+      }
+      .results-count {
+        font-size: 0.82rem;
+        color: var(--ink-faint);
+        font-family: var(--mono);
+      }
+
+      .tbl-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--card);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th {
+        text-align: left;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      td {
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      tr:last-child td { border-bottom: none; }
+      tr:hover td { background: var(--paper-2); }
+
+      .td-domain {
+        font-family: var(--mono);
+        font-size: 0.88rem;
+        color: var(--ink);
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .td-score { width: 80px; }
+      .score-badge {
+        display: inline-block;
+        font-family: var(--mono);
+        font-size: 0.88rem;
+        font-weight: 500;
+        padding: 0.18rem 0.55rem;
+        border-radius: 999px;
+        min-width: 44px;
+        text-align: center;
+      }
+      .score--good { background: #d1f0de; color: var(--good); }
+      .score--warn { background: #fef0d6; color: var(--warn); }
+      .score--bad  { background: #fde8e6; color: var(--bad);  }
+
+      .td-trackers {
+        font-size: 0.82rem;
+        color: var(--ink-soft);
+        max-width: 260px;
+      }
+      .td-date {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--ink-faint);
+        white-space: nowrap;
+      }
+      .td-status { width: 90px; }
+      .status-badge {
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 0.18rem 0.55rem;
+        border-radius: 999px;
+      }
+      .status--pending  { background: #e8e3d5; color: var(--ink-soft); }
+      .status--sent     { background: #dbeeff; color: #2455a0; }
+      .status--replied  { background: #d1f0de; color: var(--good); }
+
+      .td-actions {
+        white-space: nowrap;
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+      }
+
+      /* ── Empty state ─────────────────────────────────── */
+      .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--ink-faint);
+        font-size: 0.92rem;
+      }
+      .empty-state span {
+        display: block;
+        font-family: var(--mono);
+        font-size: 1.8rem;
+        margin-bottom: 0.5rem;
+        opacity: 0.35;
+      }
+
+      /* ── Login screen ─────────────────────────────────── */
+      #login-view {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: var(--paper);
+      }
+      .login-card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 2.5rem 2.2rem;
+        width: 100%;
+        max-width: 360px;
+        text-align: center;
+      }
+      .login-card__logo { height: 48px; mix-blend-mode: multiply; margin-bottom: 1.2rem; }
+      .login-card__title {
+        font-family: "Fraunces", Georgia, serif;
+        font-size: 1.6rem;
+        font-weight: 500;
+        margin: 0 0 0.25rem;
+      }
+      .login-card__sub {
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--pine);
+        margin: 0 0 1.8rem;
+      }
+      #login-form { display: flex; flex-direction: column; gap: 0.75rem; }
+      #pwd-input {
+        width: 100%;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.65rem 0.9rem;
+        font: 1rem "IBM Plex Sans", sans-serif;
+        color: var(--ink);
+        outline: none;
+        text-align: center;
+        letter-spacing: 0.15em;
+        transition: border-color 0.15s;
+      }
+      #pwd-input:focus { border-color: var(--pine); }
+      .login-card .btn-primary { width: 100%; padding: 0.65rem; font-size: 1rem; }
+      #login-error {
+        font-size: 0.85rem;
+        color: var(--bad);
+        margin-top: 0.25rem;
+        font-family: var(--mono);
+      }
+
+      /* ── Scan feedback row ──────────────────────────── */
+      .scan-fail-row td { color: var(--bad); font-size: 0.82rem; }
+    </style>
+  </head>
+  <body>
+
+    <!-- ── Login ─────────────────────────────────────── -->
+    <div id="login-view">
+      <div class="login-card">
+        <img class="login-card__logo" src="/logo.png" alt="Consentry" />
+        <h1 class="login-card__title">Admin</h1>
+        <p class="login-card__sub">Outreach dashboard</p>
+        <form id="login-form" novalidate>
+          <input id="pwd-input" type="password" placeholder="Password" autocomplete="current-password" />
+          <button type="submit" class="btn-primary">Sign in</button>
+        </form>
+        <p id="login-error" hidden></p>
+      </div>
+    </div>
+
+    <!-- ── Dashboard ─────────────────────────────────── -->
+    <div id="dashboard-view" hidden>
+      <div class="admin-wrap">
+
+        <header class="admin-head">
+          <a class="admin-head__brand" href="/" target="_blank">
+            <img class="admin-head__logo" src="/logo.png" alt="Consentry" />
+            <span class="admin-head__tag">Admin</span>
+          </a>
+          <button id="logout-btn" class="admin-head__logout">Sign out</button>
+        </header>
+
+        <!-- Batch scan input -->
+        <p class="section-label">Batch scanner</p>
+        <div class="scan-card">
+          <div class="scan-card__header">
+            <h2 class="scan-card__title">Scan stores</h2>
+            <span class="scan-card__hint">Max 25 URLs · ~5 s each</span>
+          </div>
+          <textarea id="urls-input" placeholder="drsquatch.com&#10;allbirds.com&#10;beardbrand.com"></textarea>
+          <div class="scan-card__foot">
+            <button id="scan-btn" class="btn-primary">Scan all</button>
+            <span id="scan-status"></span>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div class="results-section">
+          <div class="results-header">
+            <p class="section-label" style="margin:0">Scan results</p>
+            <span class="results-count" id="results-count"></span>
+          </div>
+
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Domain</th>
+                  <th>Score</th>
+                  <th>Trackers found</th>
+                  <th>Scanned</th>
+                  <th>Email</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="results-body"></tbody>
+            </table>
+            <div id="empty-state" class="empty-state" hidden>
+              <span>◎</span>
+              No scans yet — paste URLs above and hit Scan all.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <script src="/admin.js" defer></script>
+  </body>
+</html>
