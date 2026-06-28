@@ -4,8 +4,10 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import session from 'express-session';
 import { Resend } from 'resend';
 import { scanStore, ScanError } from './scanner.js';
+import { insertScan, listScans, setEmailStatus, removeScan } from './db.js';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || '1qaz0726@gmail.com';
@@ -29,6 +31,20 @@ if (process.env.TRUST_PROXY) {
   app.set('trust proxy', trust);
 }
 app.use(express.json({ limit: '8kb' }));
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'consentry-change-me-in-prod',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: !!process.env.TRUST_PROXY,
+      maxAge: 8 * 60 * 60 * 1000,
+    },
+  }),
+);
 
 // Baseline security headers.
 app.use((_req, res, next) => {
@@ -158,6 +174,113 @@ app.post('/api/waitlist', async (req, res) => {
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// ---------------------------------------------------------------------------
+// Admin panel
+// ---------------------------------------------------------------------------
+
+function requireAdmin(req, res, next) {
+  if (req.session?.adminAuthed) return next();
+  return res.status(401).json({ error: 'Unauthorized.' });
+}
+
+const loginAttempts = new Map();
+setInterval(() => loginAttempts.clear(), 60_000).unref();
+
+app.post('/api/admin/login', (req, res) => {
+  const adminPwd = process.env.ADMIN_PASSWORD;
+  if (!adminPwd) return res.status(503).json({ error: 'Admin is not configured on this server.' });
+
+  const ip = req.ip || 'unknown';
+  const attempts = (loginAttempts.get(ip) || 0) + 1;
+  loginAttempts.set(ip, attempts);
+  if (attempts > 10) return res.status(429).json({ error: 'Too many attempts. Wait a minute.' });
+
+  const { password } = req.body || {};
+  if (typeof password !== 'string' || password !== adminPwd) {
+    return res.status(401).json({ error: 'Incorrect password.' });
+  }
+  req.session.adminAuthed = true;
+  loginAttempts.set(ip, 0);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  req.session.destroy(() => {});
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/check-auth', (req, res) => {
+  res.json({ authed: !!req.session?.adminAuthed });
+});
+
+app.get('/api/admin/results', requireAdmin, (_req, res) => {
+  res.json(listScans());
+});
+
+app.post('/api/admin/update-status', requireAdmin, (req, res) => {
+  const { id, status } = req.body || {};
+  if (!Number.isInteger(id) || !['pending', 'sent', 'replied'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid id or status.' });
+  }
+  setEmailStatus(id, status);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/scan/:id', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id.' });
+  removeScan(id);
+  res.json({ ok: true });
+});
+
+const BULK_CONCURRENCY = 4;
+const BULK_MAX = 25;
+
+async function runBulkScans(urls) {
+  const results = [];
+  for (let i = 0; i < urls.length; i += BULK_CONCURRENCY) {
+    const chunk = urls.slice(i, i + BULK_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      chunk.map(async (rawUrl) => {
+        const result = await scanStore(rawUrl);
+        const domain = new URL(result.finalUrl).hostname;
+        insertScan(domain, result.score, result.trackers, result.cmps.length > 0);
+        return { domain, score: result.score, ok: true };
+      }),
+    );
+    for (let j = 0; j < settled.length; j++) {
+      const item = settled[j];
+      if (item.status === 'fulfilled') {
+        results.push(item.value);
+      } else {
+        const raw = chunk[j];
+        const domain = raw.replace(/^https?:\/\//i, '').split('/')[0];
+        const msg = item.reason instanceof ScanError ? item.reason.message : 'Scan failed.';
+        results.push({ domain, ok: false, error: msg });
+      }
+    }
+  }
+  return results;
+}
+
+app.post('/api/admin/bulk-scan', requireAdmin, async (req, res) => {
+  const { urls } = req.body || {};
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return res.status(400).json({ error: 'Provide a non-empty array of URLs.' });
+  }
+  if (urls.length > BULK_MAX) {
+    return res.status(400).json({ error: `Max ${BULK_MAX} URLs per batch.` });
+  }
+  const cleanUrls = urls.filter((u) => typeof u === 'string' && u.trim()).map((u) => u.trim());
+  try {
+    const results = await runBulkScans(cleanUrls);
+    res.json({ results });
+  } catch (err) {
+    console.error('Bulk scan error:', err);
+    res.status(500).json({ error: 'Bulk scan failed.' });
+  }
+});
 
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
