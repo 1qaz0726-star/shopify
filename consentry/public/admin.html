@@ -29,6 +29,9 @@
         --ease:       cubic-bezier(0.22, 0.61, 0.36, 1);
       }
 
+      /* Ensure [hidden] always wins over explicit display rules. */
+      [hidden] { display: none !important; }
+
       * { box-sizing: border-box; }
 
       body {
