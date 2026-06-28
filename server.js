@@ -245,7 +245,15 @@ async function runBulkScans(urls) {
       chunk.map(async (rawUrl) => {
         const result = await scanStore(rawUrl);
         const domain = new URL(result.finalUrl).hostname;
-        insertScan(domain, result.score, result.trackers, result.cmps.length > 0);
+        insertScan({
+          domain,
+          score:           result.score,
+          level:           result.level,
+          trackers:        result.trackers,
+          cmps:            result.cmps,
+          findings:        result.findings,
+          hasConsentLayer: result.cmps.length > 0,
+        });
         return { domain, score: result.score, ok: true };
       }),
     );
@@ -280,6 +288,79 @@ app.post('/api/admin/bulk-scan', requireAdmin, async (req, res) => {
     console.error('Bulk scan error:', err);
     res.status(500).json({ error: 'Bulk scan failed.' });
   }
+});
+
+// Curated seed list — confirmed Shopify stores across niches.
+// Used when GOOGLE_SEARCH_API_KEY is not set.
+const SEED_STORES = [
+  // Grooming / Personal care
+  { domain: 'drsquatch.com',      niche: 'grooming' },
+  { domain: 'beardbrand.com',     niche: 'grooming' },
+  { domain: 'manscaped.com',      niche: 'grooming' },
+  { domain: 'harrys.com',         niche: 'grooming' },
+  // Fitness / Apparel
+  { domain: 'gymshark.com',       niche: 'fitness' },
+  { domain: 'figs.com',           niche: 'apparel' },
+  { domain: 'cuts.com',           niche: 'apparel' },
+  { domain: 'vuoriclothing.com',  niche: 'apparel' },
+  { domain: 'chubbies.com',       niche: 'apparel' },
+  // Footwear
+  { domain: 'allbirds.com',       niche: 'footwear' },
+  { domain: 'rothys.com',         niche: 'footwear' },
+  // Beauty / Skincare
+  { domain: 'glossier.com',       niche: 'beauty' },
+  { domain: 'tatcha.com',         niche: 'beauty' },
+  { domain: 'herbivore.com',      niche: 'beauty' },
+  { domain: 'kiehlsofficial.com', niche: 'beauty' },
+  // Supplements / Health
+  { domain: 'liquid-iv.com',      niche: 'supplements' },
+  { domain: 'ag1.com',            niche: 'supplements' },
+  { domain: 'ritual.com',         niche: 'supplements' },
+  // Home / Lifestyle
+  { domain: 'brooklinen.com',     niche: 'home' },
+  { domain: 'parachutehome.com',  niche: 'home' },
+  { domain: 'ruggable.com',       niche: 'home' },
+  { domain: 'graza.co',           niche: 'food' },
+  // DTC / Tech
+  { domain: 'away.com',           niche: 'travel' },
+  { domain: 'mejuri.com',         niche: 'jewelry' },
+  { domain: 'bombas.com',         niche: 'apparel' },
+];
+
+app.get('/api/admin/discover', requireAdmin, async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const googleKey = process.env.GOOGLE_SEARCH_API_KEY;
+  const googleCx  = process.env.GOOGLE_SEARCH_CX;
+
+  // --- Google Custom Search (if configured) ---
+  if (googleKey && googleCx) {
+    try {
+      const query = encodeURIComponent(`"cdn.shopify.com" ${q || 'store'}`);
+      const apiUrl = `https://www.googleapis.com/customsearch/v1?key=${googleKey}&cx=${googleCx}&q=${query}&num=10`;
+      const gRes = await fetch(apiUrl, {
+        signal: AbortSignal.timeout(8000),
+        headers: { Accept: 'application/json' },
+      });
+      if (gRes.ok) {
+        const data = await gRes.json();
+        const domains = (data.items || [])
+          .map((item) => { try { return new URL(item.link).hostname.replace(/^www\./, ''); } catch { return null; } })
+          .filter(Boolean)
+          .filter((d, i, a) => a.indexOf(d) === i);
+        return res.json({ domains, source: 'google', hasApiKey: true });
+      }
+    } catch { /* fall through to seed */ }
+  }
+
+  // --- Seed list fallback ---
+  const filtered = q
+    ? SEED_STORES.filter((s) => s.niche.includes(q) || s.domain.includes(q))
+    : SEED_STORES;
+  res.json({
+    domains:    filtered.map((s) => ({ domain: s.domain, niche: s.niche })),
+    source:     'seed',
+    hasApiKey:  !!(googleKey && googleCx),
+  });
 });
 
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));

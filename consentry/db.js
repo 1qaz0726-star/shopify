@@ -30,15 +30,18 @@ function save() {
   renameSync(TMP_PATH, DB_PATH); // atomic on POSIX; best-effort on Windows
 }
 
-export function insertScan(domain, score, trackers, hasConsentLayer) {
+export function insertScan({ domain, score, level, trackers, cmps, findings, hasConsentLayer }) {
   const row = {
-    id:               _nextId++,
+    id:                _nextId++,
     domain,
     score,
-    trackers:         Array.isArray(trackers) ? trackers : [],
+    level:             level    || 'unknown',
+    trackers:          Array.isArray(trackers) ? trackers : [],
+    cmps:              Array.isArray(cmps)     ? cmps     : [],
+    findings:          Array.isArray(findings) ? findings : [],
     has_consent_layer: !!hasConsentLayer,
-    scanned_at:       new Date().toISOString(),
-    email_status:     'pending',
+    scanned_at:        new Date().toISOString(),
+    email_status:      'pending',
   };
   _scans.push(row);
   save();
