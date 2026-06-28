@@ -49,14 +49,28 @@ function showDashboard() {
 loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   loginError.hidden = true;
-  const { ok, data } = await api('POST', '/api/admin/login', { password: pwdInput.value });
-  if (ok) {
-    pwdInput.value = '';
-    showDashboard();
-  } else {
-    loginError.textContent = data.error || 'Incorrect password.';
+
+  const submitBtn = loginForm.querySelector('button[type="submit"]');
+  const origText = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Signing in…';
+
+  try {
+    const { ok, data } = await api('POST', '/api/admin/login', { password: pwdInput.value });
+    if (ok) {
+      pwdInput.value = '';
+      showDashboard();
+    } else {
+      loginError.textContent = data.error || 'Incorrect password.';
+      loginError.hidden = false;
+      pwdInput.select();
+    }
+  } catch (err) {
+    loginError.textContent = 'Network error — is the server awake? Try again in 10s.';
     loginError.hidden = false;
-    pwdInput.select();
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = origText;
   }
 });
 
