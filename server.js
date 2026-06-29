@@ -290,7 +290,6 @@ app.post('/api/admin/bulk-scan', requireAdmin, async (req, res) => {
   }
 });
 
-// Domains that should never appear as "discovered" stores.
 const EXCLUDED_DOMAINS = new Set([
   'shopify.com', 'myshopify.com', 'shopifyplus.com', 'shopify.dev',
   'apps.shopify.com', 'help.shopify.com', 'community.shopify.com',
@@ -298,91 +297,144 @@ const EXCLUDED_DOMAINS = new Set([
   'facebook.com', 'instagram.com', 'tiktok.com', 'pinterest.com',
   'medium.com', 'google.com', 'wikipedia.org', 'amazon.com',
   'hubspot.com', 'oberlo.com', 'ecwid.com', 'woocommerce.com',
+  'shopifyeducation.com', 'linktr.ee', 'linkinbio.com',
 ]);
 
-// Scrape DuckDuckGo HTML for "powered by shopify" <niche> results.
-// Returns an array of {domain, niche} objects, or null on failure.
+function isValidStoreDomain(d) {
+  return (
+    d && d.includes('.') &&
+    !EXCLUDED_DOMAINS.has(d) &&
+    !d.includes('shopify') &&
+    d.split('.').length <= 3 &&
+    !/^(blog|docs|support|help|www2|cdn|api|mail|news|shop)\./i.test(d)
+  );
+}
+
+// Try DDG Lite first (lighter bot detection), then DDG HTML POST as fallback.
+// Both search for "powered by shopify <niche>" and extract result domains.
 async function scrapeStoresFromDDG(niche) {
   const query = `"powered by shopify" ${niche}`;
+
+  // ── DDG Lite (GET) ────────────────────────────────────────────
+  try {
+    const res = await fetch(
+      `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}&kl=us-en`,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+    if (res.ok) {
+      const html = await res.text();
+      const domains = new Set();
+      // DDG Lite encodes result URLs as uddg= in redirect hrefs
+      for (const m of html.matchAll(/uddg=([^&"'\s]+)/gi)) {
+        try {
+          const d = new URL(decodeURIComponent(m[1])).hostname.replace(/^www\./, '').toLowerCase();
+          if (isValidStoreDomain(d)) domains.add(d);
+        } catch {}
+      }
+      if (domains.size > 0) return [...domains].slice(0, 20).map((domain) => ({ domain, niche }));
+    }
+  } catch {}
+
+  // ── DDG HTML (POST fallback) ──────────────────────────────────
   try {
     const res = await fetch('https://html.duckduckgo.com/html/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
         'Accept-Language': 'en-US,en;q=0.9',
       },
       body: new URLSearchParams({ q: query, b: '', kl: 'us-en' }).toString(),
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return null;
-    const html = await res.text();
-
-    const domains = new Set();
-
-    // DDG HTML: <a class="result__url__domain" href="https://store.com">store.com</a>
-    const domainLinks = [...html.matchAll(/class="result__url__domain"[^>]*href="(https?:\/\/[^"]+)"/gi)];
-    for (const m of domainLinks) {
-      try {
-        const d = new URL(m[1]).hostname.replace(/^www\./, '').toLowerCase();
-        if (d && d.includes('.') && !EXCLUDED_DOMAINS.has(d) && !d.includes('shopify')) domains.add(d);
-      } catch {}
-    }
-
-    // Fallback: result__a href
-    if (domains.size < 3) {
-      const hrefs = [...html.matchAll(/class="result__a"[^>]+href="(https?:\/\/[^"]+)"/gi)];
-      for (const m of hrefs) {
+    if (res.ok) {
+      const html = await res.text();
+      const domains = new Set();
+      for (const m of html.matchAll(/uddg=([^&"'\s]+)/gi)) {
         try {
-          const d = new URL(m[1]).hostname.replace(/^www\./, '').toLowerCase();
-          if (d && d.includes('.') && !EXCLUDED_DOMAINS.has(d) && !d.includes('shopify')) domains.add(d);
+          const d = new URL(decodeURIComponent(m[1])).hostname.replace(/^www\./, '').toLowerCase();
+          if (isValidStoreDomain(d)) domains.add(d);
         } catch {}
       }
+      for (const m of html.matchAll(/class="result__url__domain"[^>]*href="(https?:\/\/[^"]+)"/gi)) {
+        try {
+          const d = new URL(m[1]).hostname.replace(/^www\./, '').toLowerCase();
+          if (isValidStoreDomain(d)) domains.add(d);
+        } catch {}
+      }
+      if (domains.size > 0) return [...domains].slice(0, 20).map((domain) => ({ domain, niche }));
     }
+  } catch {}
 
-    const results = [...domains].slice(0, 20).map((domain) => ({ domain, niche }));
-    return results.length > 0 ? results : null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-// Curated seed list — confirmed Shopify stores across niches.
-// Used when GOOGLE_SEARCH_API_KEY is not set.
+// Curated seed stores — fallback when DDG / Google Search unavailable.
+// Niches are single keywords; keyword matching in the discover endpoint
+// splits the query so "pet supplies" matches stores with niche "pet".
 const SEED_STORES = [
-  // Grooming / Personal care
-  { domain: 'drsquatch.com',      niche: 'grooming' },
-  { domain: 'beardbrand.com',     niche: 'grooming' },
-  { domain: 'manscaped.com',      niche: 'grooming' },
-  { domain: 'harrys.com',         niche: 'grooming' },
-  // Fitness / Apparel
-  { domain: 'gymshark.com',       niche: 'fitness' },
-  { domain: 'figs.com',           niche: 'apparel' },
-  { domain: 'cuts.com',           niche: 'apparel' },
-  { domain: 'vuoriclothing.com',  niche: 'apparel' },
-  { domain: 'chubbies.com',       niche: 'apparel' },
-  // Footwear
-  { domain: 'allbirds.com',       niche: 'footwear' },
-  { domain: 'rothys.com',         niche: 'footwear' },
-  // Beauty / Skincare
-  { domain: 'glossier.com',       niche: 'beauty' },
-  { domain: 'tatcha.com',         niche: 'beauty' },
-  { domain: 'herbivore.com',      niche: 'beauty' },
-  { domain: 'kiehlsofficial.com', niche: 'beauty' },
+  // Grooming
+  { domain: 'drsquatch.com',       niche: 'grooming' },
+  { domain: 'beardbrand.com',      niche: 'grooming' },
+  { domain: 'manscaped.com',       niche: 'grooming' },
+  { domain: 'harrys.com',          niche: 'grooming' },
+  // Pet
+  { domain: 'ruffwear.com',        niche: 'pet' },
+  { domain: 'barkshop.com',        niche: 'pet' },
+  { domain: 'wildone.com',         niche: 'pet' },
+  { domain: 'yummers.com',         niche: 'pet' },
+  { domain: 'pupford.com',         niche: 'pet' },
   // Supplements / Health
-  { domain: 'liquid-iv.com',      niche: 'supplements' },
-  { domain: 'ag1.com',            niche: 'supplements' },
-  { domain: 'ritual.com',         niche: 'supplements' },
+  { domain: 'liquid-iv.com',       niche: 'supplements' },
+  { domain: 'ag1.com',             niche: 'supplements' },
+  { domain: 'ritual.com',          niche: 'supplements' },
+  { domain: 'momentous.com',       niche: 'supplements' },
+  { domain: 'organifi.com',        niche: 'supplements' },
+  { domain: 'promixnutrition.com', niche: 'supplements' },
+  // Beauty / Skincare
+  { domain: 'glossier.com',        niche: 'beauty' },
+  { domain: 'tatcha.com',          niche: 'beauty' },
+  { domain: 'herbivore.com',       niche: 'beauty' },
+  { domain: 'necessaire.com',      niche: 'beauty' },
+  { domain: 'cocokind.com',        niche: 'beauty' },
+  { domain: 'topicals.co',         niche: 'beauty' },
+  // Fitness / Apparel / Fashion
+  { domain: 'gymshark.com',        niche: 'fitness' },
+  { domain: 'figs.com',            niche: 'apparel' },
+  { domain: 'cuts.com',            niche: 'apparel' },
+  { domain: 'vuoriclothing.com',   niche: 'apparel' },
+  { domain: 'chubbies.com',        niche: 'apparel' },
+  { domain: 'summersalt.com',      niche: 'apparel' },
+  { domain: 'bombas.com',          niche: 'apparel' },
+  // Footwear
+  { domain: 'allbirds.com',        niche: 'footwear' },
+  { domain: 'rothys.com',          niche: 'footwear' },
   // Home / Lifestyle
-  { domain: 'brooklinen.com',     niche: 'home' },
-  { domain: 'parachutehome.com',  niche: 'home' },
-  { domain: 'ruggable.com',       niche: 'home' },
-  { domain: 'graza.co',           niche: 'food' },
-  // DTC / Tech
-  { domain: 'away.com',           niche: 'travel' },
-  { domain: 'mejuri.com',         niche: 'jewelry' },
-  { domain: 'bombas.com',         niche: 'apparel' },
+  { domain: 'brooklinen.com',      niche: 'home' },
+  { domain: 'parachutehome.com',   niche: 'home' },
+  { domain: 'ruggable.com',        niche: 'home' },
+  { domain: 'snowe.com',           niche: 'home' },
+  { domain: 'ugmonk.com',          niche: 'home' },
+  // Food / Beverage
+  { domain: 'graza.co',            niche: 'food' },
+  { domain: 'omsom.com',           niche: 'food' },
+  { domain: 'brightland.co',       niche: 'food' },
+  { domain: 'diasporaco.com',      niche: 'food' },
+  // Jewelry / Accessories
+  { domain: 'mejuri.com',          niche: 'jewelry' },
+  { domain: 'gorjana.com',         niche: 'jewelry' },
+  { domain: 'aurate.com',          niche: 'jewelry' },
+  // Travel / Bags
+  { domain: 'away.com',            niche: 'travel' },
+  { domain: 'wandrd.com',          niche: 'travel' },
 ];
 
 app.get('/api/admin/discover', requireAdmin, async (req, res) => {
@@ -422,9 +474,11 @@ app.get('/api/admin/discover', requireAdmin, async (req, res) => {
     }
   }
 
-  // --- Seed list fallback (shuffle for variety, filter already scanned) ---
-  const base = q
-    ? SEED_STORES.filter((s) => s.niche.includes(q) || s.domain.includes(q))
+  // --- Seed list fallback (keyword split, shuffle, filter already scanned) ---
+  // Split multi-word queries so "pet supplies" matches niche "pet".
+  const keywords = q ? q.split(/\s+/).filter((kw) => kw.length > 2) : [];
+  const base = keywords.length
+    ? SEED_STORES.filter((s) => keywords.some((kw) => s.niche.includes(kw) || s.domain.includes(kw)))
     : SEED_STORES;
   const unscanned = base.filter((s) => !scannedDomains.has(s.domain));
   const shuffled  = [...unscanned].sort(() => Math.random() - 0.5).slice(0, 25);
