@@ -119,6 +119,8 @@
         margin-top: 0.8rem; font-size: 0.8rem; color: var(--ink-faint); font-family: var(--mono);
       }
       .discover-note a { color: var(--pine); }
+      .discover-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.65rem; }
+      .btn-preset { font-size: 0.76rem; padding: 0.2rem 0.65rem; }
 
       /* ── Buttons ─────────────────────────────────────── */
       .btn-primary {
@@ -263,8 +265,17 @@
             <span class="card__hint" id="discover-source"></span>
           </div>
           <div class="discover-row">
-            <input id="discover-input" class="discover-input" type="text" placeholder="niche keyword — e.g. beauty, fitness, supplements…" />
+            <input id="discover-input" class="discover-input" type="text" placeholder="niche keyword — e.g. beauty, pet, supplements…" />
             <button id="discover-btn" class="btn-primary">Find stores</button>
+          </div>
+          <div class="discover-presets">
+            <button class="btn-sm btn-preset" data-niche="pet supplies">Pet supplies</button>
+            <button class="btn-sm btn-preset" data-niche="supplements vitamins">Supplements</button>
+            <button class="btn-sm btn-preset" data-niche="beauty skincare">Beauty</button>
+            <button class="btn-sm btn-preset" data-niche="home decor">Home decor</button>
+            <button class="btn-sm btn-preset" data-niche="fashion clothing">Fashion</button>
+            <button class="btn-sm btn-preset" data-niche="food artisan">Food</button>
+            <button class="btn-sm btn-preset" data-niche="jewelry accessories">Jewelry</button>
           </div>
           <div id="discover-list" class="discover-list"></div>
           <p id="discover-note" class="discover-note" hidden></p>

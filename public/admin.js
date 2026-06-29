@@ -83,7 +83,8 @@ async function loadDiscover(q) {
 
   try {
     const { data } = await api('GET', `/api/admin/discover?q=${encodeURIComponent(q)}`);
-    discoverSource.textContent = data.source === 'google' ? 'via Google Search' : 'curated list';
+    const srcLabel = { google: 'via Google Search', ddg: 'via DuckDuckGo', seed: 'curated list' };
+    discoverSource.textContent = srcLabel[data.source] || 'curated list';
 
     const items = data.domains || [];
     if (!items.length) {
@@ -102,8 +103,12 @@ async function loadDiscover(q) {
       }).join('');
     }
 
-    if (!data.hasApiKey) {
-      discoverNote.innerHTML = 'Showing curated list. <a href="https://programmablesearch.google.com/" target="_blank" rel="noopener">Set up Google Search API</a> for live niche search → add <code>GOOGLE_SEARCH_API_KEY</code> + <code>GOOGLE_SEARCH_CX</code> to Render env vars.';
+    const scannedCount = data.scannedCount || 0;
+    if (data.source === 'ddg') {
+      discoverNote.innerHTML = `Found ${items.length} stores via DuckDuckGo${scannedCount ? ` · ${scannedCount} already-scanned filtered out` : ''}.`;
+      discoverNote.hidden = false;
+    } else if (data.source === 'seed') {
+      discoverNote.innerHTML = `${scannedCount ? `${scannedCount} already-scanned filtered out · ` : ''}DuckDuckGo unavailable — showing curated list. Type a niche keyword to try live search.`;
       discoverNote.hidden = false;
     }
   } catch {
@@ -113,6 +118,13 @@ async function loadDiscover(q) {
 
 discoverBtn.addEventListener('click', () => loadDiscover(discoverInput.value.trim()));
 discoverInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDiscover(discoverInput.value.trim()); });
+
+document.querySelector('.discover-presets')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-preset');
+  if (!btn) return;
+  discoverInput.value = btn.dataset.niche;
+  loadDiscover(btn.dataset.niche);
+});
 
 discoverList.addEventListener('click', (e) => {
   const btn = e.target.closest('.btn-add-to-scan');

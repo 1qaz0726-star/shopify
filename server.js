@@ -290,6 +290,64 @@ app.post('/api/admin/bulk-scan', requireAdmin, async (req, res) => {
   }
 });
 
+// Domains that should never appear as "discovered" stores.
+const EXCLUDED_DOMAINS = new Set([
+  'shopify.com', 'myshopify.com', 'shopifyplus.com', 'shopify.dev',
+  'apps.shopify.com', 'help.shopify.com', 'community.shopify.com',
+  'youtube.com', 'reddit.com', 'twitter.com', 'x.com',
+  'facebook.com', 'instagram.com', 'tiktok.com', 'pinterest.com',
+  'medium.com', 'google.com', 'wikipedia.org', 'amazon.com',
+  'hubspot.com', 'oberlo.com', 'ecwid.com', 'woocommerce.com',
+]);
+
+// Scrape DuckDuckGo HTML for "powered by shopify" <niche> results.
+// Returns an array of {domain, niche} objects, or null on failure.
+async function scrapeStoresFromDDG(niche) {
+  const query = `"powered by shopify" ${niche}`;
+  try {
+    const res = await fetch('https://html.duckduckgo.com/html/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      body: new URLSearchParams({ q: query, b: '', kl: 'us-en' }).toString(),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    const domains = new Set();
+
+    // DDG HTML: <a class="result__url__domain" href="https://store.com">store.com</a>
+    const domainLinks = [...html.matchAll(/class="result__url__domain"[^>]*href="(https?:\/\/[^"]+)"/gi)];
+    for (const m of domainLinks) {
+      try {
+        const d = new URL(m[1]).hostname.replace(/^www\./, '').toLowerCase();
+        if (d && d.includes('.') && !EXCLUDED_DOMAINS.has(d) && !d.includes('shopify')) domains.add(d);
+      } catch {}
+    }
+
+    // Fallback: result__a href
+    if (domains.size < 3) {
+      const hrefs = [...html.matchAll(/class="result__a"[^>]+href="(https?:\/\/[^"]+)"/gi)];
+      for (const m of hrefs) {
+        try {
+          const d = new URL(m[1]).hostname.replace(/^www\./, '').toLowerCase();
+          if (d && d.includes('.') && !EXCLUDED_DOMAINS.has(d) && !d.includes('shopify')) domains.add(d);
+        } catch {}
+      }
+    }
+
+    const results = [...domains].slice(0, 20).map((domain) => ({ domain, niche }));
+    return results.length > 0 ? results : null;
+  } catch {
+    return null;
+  }
+}
+
 // Curated seed list — confirmed Shopify stores across niches.
 // Used when GOOGLE_SEARCH_API_KEY is not set.
 const SEED_STORES = [
@@ -332,6 +390,8 @@ app.get('/api/admin/discover', requireAdmin, async (req, res) => {
   const googleKey = process.env.GOOGLE_SEARCH_API_KEY;
   const googleCx  = process.env.GOOGLE_SEARCH_CX;
 
+  const scannedDomains = new Set(listScans().map((s) => s.domain));
+
   // --- Google Custom Search (if configured) ---
   if (googleKey && googleCx) {
     try {
@@ -346,20 +406,33 @@ app.get('/api/admin/discover', requireAdmin, async (req, res) => {
         const domains = (data.items || [])
           .map((item) => { try { return new URL(item.link).hostname.replace(/^www\./, ''); } catch { return null; } })
           .filter(Boolean)
-          .filter((d, i, a) => a.indexOf(d) === i);
-        return res.json({ domains, source: 'google', hasApiKey: true });
+          .filter((d, i, a) => a.indexOf(d) === i)
+          .filter((d) => !scannedDomains.has(d));
+        return res.json({ domains, source: 'google', hasApiKey: true, scannedCount: scannedDomains.size });
       }
-    } catch { /* fall through to seed */ }
+    } catch { /* fall through */ }
   }
 
-  // --- Seed list fallback ---
-  const filtered = q
+  // --- DuckDuckGo live search (when a keyword is given) ---
+  if (q) {
+    const ddgResults = await scrapeStoresFromDDG(q);
+    if (ddgResults && ddgResults.length > 0) {
+      const fresh = ddgResults.filter((s) => !scannedDomains.has(s.domain));
+      return res.json({ domains: fresh, source: 'ddg', hasApiKey: false, scannedCount: scannedDomains.size });
+    }
+  }
+
+  // --- Seed list fallback (shuffle for variety, filter already scanned) ---
+  const base = q
     ? SEED_STORES.filter((s) => s.niche.includes(q) || s.domain.includes(q))
     : SEED_STORES;
+  const unscanned = base.filter((s) => !scannedDomains.has(s.domain));
+  const shuffled  = [...unscanned].sort(() => Math.random() - 0.5).slice(0, 25);
   res.json({
-    domains:    filtered.map((s) => ({ domain: s.domain, niche: s.niche })),
-    source:     'seed',
-    hasApiKey:  !!(googleKey && googleCx),
+    domains:      shuffled.map((s) => ({ domain: s.domain, niche: s.niche })),
+    source:       'seed',
+    hasApiKey:    false,
+    scannedCount: scannedDomains.size,
   });
 });
 
