@@ -117,7 +117,7 @@ function setPipelineStatus(state) {
 fetchBtn.addEventListener('click', async () => {
   fetchBtn.disabled    = true;
   fetchBtn.textContent = 'Fetching…';
-  pipelineNote.textContent = 'Searching DuckDuckGo for German Shopify stores…';
+  pipelineNote.textContent = 'Querying Common Crawl for Shopify stores…';
   try {
     const { ok, data } = await api('POST', '/api/admin/fetch-targets');
     if (ok) {
@@ -132,7 +132,7 @@ fetchBtn.addEventListener('click', async () => {
     pipelineNote.textContent = 'Network error during fetch.';
   } finally {
     fetchBtn.disabled    = false;
-    fetchBtn.textContent = '🇩🇪 Fetch German stores';
+    fetchBtn.textContent = '🔍 Fetch Shopify stores';
   }
 });
 

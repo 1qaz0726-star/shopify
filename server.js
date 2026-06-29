@@ -294,52 +294,55 @@ app.post('/api/admin/bulk-scan', requireAdmin, async (req, res) => {
   }
 });
 
-// German product keywords — used to find small DE/EU stores via site:myshopify.com searches.
-const DE_QUERIES = [
-  'naturkosmetik', 'tierbedarf hund', 'schmuck handgemacht',
-  'bio lebensmittel', 'sportbekleidung damen', 'wohnaccessoires',
-  'hundebedarf katze', 'vegane kosmetik', 'röstkaffee spezialität',
-  'yoga zubehör matte', 'kinderspielzeug holz', 'nachhaltige mode',
-  'nahrungsergänzung sport', 'bartpflege männer', 'babykleidung bio',
-];
+// Subdomains that belong to Shopify infrastructure, not real stores.
+const CC_SKIP = new Set([
+  'cdn', 'cdn2', 'cdn3', 'static', 'checkout', 'www', 'shop',
+  'assets', 'maps', 'proxy', 'help', 'community', 'partners',
+]);
 
-async function fetchGermanTargets() {
+// Fetch real Shopify store domains from Common Crawl CDX API.
+// This is a free public API designed for programmatic access — not blocked on cloud IPs.
+// Queries *.myshopify.com across the 3 most recent crawl indexes and returns unique store domains.
+async function fetchStoreTargets() {
   const allDomains = new Set();
-  await Promise.allSettled(
-    DE_QUERIES.map(async (keyword) => {
-      try {
-        const query = `site:myshopify.com ${keyword}`;
-        const res = await fetch(
-          `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}&kl=de-de`,
-          {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'text/html',
-              'Accept-Language': 'de-DE,de;q=0.9,en;q=0.5',
-            },
-            signal: AbortSignal.timeout(10000),
+
+  // Get the most recent crawl indexes (fallback to known ones if API fails)
+  let indexes = ['CC-MAIN-2024-33', 'CC-MAIN-2024-26', 'CC-MAIN-2024-18'];
+  try {
+    const infoRes = await fetch('https://index.commoncrawl.org/collinfo.json', {
+      signal: AbortSignal.timeout(8000),
+      headers: { Accept: 'application/json' },
+    });
+    if (infoRes.ok) {
+      const info = await infoRes.json();
+      indexes = info.slice(0, 3).map((c) => c.id);
+    }
+  } catch {}
+
+  // Query each index for *.myshopify.com — response is newline-delimited JSON
+  for (const idx of indexes) {
+    if (allDomains.size >= 400) break;
+    try {
+      const apiUrl = `https://index.commoncrawl.org/${idx}-index?url=*.myshopify.com&output=json&fl=url&limit=500`;
+      const res = await fetch(apiUrl, {
+        signal: AbortSignal.timeout(25000),
+        headers: { Accept: 'application/json, text/plain' },
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      for (const line of text.trim().split('\n')) {
+        if (!line) continue;
+        try {
+          const { url: pageUrl } = JSON.parse(line);
+          const m = String(pageUrl).match(/^https?:\/\/([a-z0-9][a-z0-9-]{0,59})\.myshopify\.com/i);
+          if (m && !CC_SKIP.has(m[1].toLowerCase())) {
+            allDomains.add(`${m[1].toLowerCase()}.myshopify.com`);
           }
-        );
-        if (!res.ok) return;
-        const html = await res.text();
-        // myshopify.com subdomains in result text
-        for (const m of html.matchAll(/\b([a-z0-9][a-z0-9-]{1,59})\.myshopify\.com\b/gi)) {
-          const sub = m[1].toLowerCase();
-          if (!['cdn', 'cdn2', 'static', 'checkout', 'www', 'shop', 'assets'].includes(sub)) {
-            allDomains.add(`${sub}.myshopify.com`);
-          }
-        }
-        // uddg-encoded URLs
-        for (const m of html.matchAll(/uddg=([^&"'\s]+)/gi)) {
-          try {
-            const url = decodeURIComponent(m[1]);
-            const match = url.match(/\b([a-z0-9][a-z0-9-]{1,59})\.myshopify\.com\b/i);
-            if (match) allDomains.add(`${match[1].toLowerCase()}.myshopify.com`);
-          } catch {}
-        }
-      } catch {}
-    })
-  );
+        } catch {}
+      }
+    } catch {}
+  }
+
   return [...allDomains];
 }
 
@@ -502,11 +505,12 @@ app.get('/api/admin/next-batch', requireAdmin, (req, res) => {
   res.json({ domains, stats: getQueueStats() });
 });
 
-// Scrape DDG for German Shopify stores and add to queue
+// Fetch Shopify store targets from Common Crawl CDX API and add to queue
 app.post('/api/admin/fetch-targets', requireAdmin, async (req, res) => {
-  const found = await fetchGermanTargets();
-  const scannedSet = new Set(listScans().map(s => s.domain));
-  const fresh = found.filter(d => !scannedSet.has(d));
+  const found = await fetchStoreTargets();
+  const scannedSet = new Set(listScans().map((s) => s.domain));
+  const queueSet   = new Set(); // addToQueue handles internal dedup
+  const fresh = found.filter((d) => !scannedSet.has(d));
   const added = addToQueue(fresh);
   res.json({ added, found: found.length, stats: getQueueStats() });
 });
