@@ -8,6 +8,7 @@ import session from 'express-session';
 import { Resend } from 'resend';
 import { scanStore, ScanError } from './scanner.js';
 import { insertScan, listScans, setEmailStatus, removeScan } from './db.js';
+import { addToQueue, getNextBatch, markDone, getStats as getQueueStats, resetScanning } from './queue.js';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || '1qaz0726@gmail.com';
@@ -17,6 +18,7 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.disable('x-powered-by');
+resetScanning(); // restore any mid-flight queue items to pending on server restart
 // Behind a known proxy/CDN set TRUST_PROXY so req.ip reflects the real client.
 // Accept a hop count ("1"), a boolean ("true"/"false"), or a CIDR/preset list
 // ("loopback", "10.0.0.0/8"). Coerce numeric/boolean strings explicitly —
@@ -254,6 +256,7 @@ async function runBulkScans(urls) {
           findings:        result.findings,
           hasConsentLayer: result.cmps.length > 0,
         });
+        markDone(rawUrl.replace(/^https?:\/\//i, '').split('/')[0]);
         return { domain, score: result.score, ok: true };
       }),
     );
@@ -265,6 +268,7 @@ async function runBulkScans(urls) {
         const raw = chunk[j];
         const domain = raw.replace(/^https?:\/\//i, '').split('/')[0];
         const msg = item.reason instanceof ScanError ? item.reason.message : 'Scan failed.';
+        markDone(domain); // mark failed scans done so queue doesn't retry indefinitely
         results.push({ domain, ok: false, error: msg });
       }
     }
@@ -289,6 +293,55 @@ app.post('/api/admin/bulk-scan', requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Bulk scan failed.' });
   }
 });
+
+// German product keywords — used to find small DE/EU stores via site:myshopify.com searches.
+const DE_QUERIES = [
+  'naturkosmetik', 'tierbedarf hund', 'schmuck handgemacht',
+  'bio lebensmittel', 'sportbekleidung damen', 'wohnaccessoires',
+  'hundebedarf katze', 'vegane kosmetik', 'röstkaffee spezialität',
+  'yoga zubehör matte', 'kinderspielzeug holz', 'nachhaltige mode',
+  'nahrungsergänzung sport', 'bartpflege männer', 'babykleidung bio',
+];
+
+async function fetchGermanTargets() {
+  const allDomains = new Set();
+  await Promise.allSettled(
+    DE_QUERIES.map(async (keyword) => {
+      try {
+        const query = `site:myshopify.com ${keyword}`;
+        const res = await fetch(
+          `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}&kl=de-de`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html',
+              'Accept-Language': 'de-DE,de;q=0.9,en;q=0.5',
+            },
+            signal: AbortSignal.timeout(10000),
+          }
+        );
+        if (!res.ok) return;
+        const html = await res.text();
+        // myshopify.com subdomains in result text
+        for (const m of html.matchAll(/\b([a-z0-9][a-z0-9-]{1,59})\.myshopify\.com\b/gi)) {
+          const sub = m[1].toLowerCase();
+          if (!['cdn', 'cdn2', 'static', 'checkout', 'www', 'shop', 'assets'].includes(sub)) {
+            allDomains.add(`${sub}.myshopify.com`);
+          }
+        }
+        // uddg-encoded URLs
+        for (const m of html.matchAll(/uddg=([^&"'\s]+)/gi)) {
+          try {
+            const url = decodeURIComponent(m[1]);
+            const match = url.match(/\b([a-z0-9][a-z0-9-]{1,59})\.myshopify\.com\b/i);
+            if (match) allDomains.add(`${match[1].toLowerCase()}.myshopify.com`);
+          } catch {}
+        }
+      } catch {}
+    })
+  );
+  return [...allDomains];
+}
 
 const EXCLUDED_DOMAINS = new Set([
   'shopify.com', 'myshopify.com', 'shopifyplus.com', 'shopify.dev',
@@ -436,6 +489,39 @@ const SEED_STORES = [
   { domain: 'away.com',            niche: 'travel' },
   { domain: 'wandrd.com',          niche: 'travel' },
 ];
+
+// Queue stats
+app.get('/api/admin/queue-stats', requireAdmin, (_req, res) => {
+  res.json(getQueueStats());
+});
+
+// Next batch of unscanned domains
+app.get('/api/admin/next-batch', requireAdmin, (req, res) => {
+  const n = Math.min(parseInt(req.query.n) || 25, 25);
+  const domains = getNextBatch(n);
+  res.json({ domains, stats: getQueueStats() });
+});
+
+// Scrape DDG for German Shopify stores and add to queue
+app.post('/api/admin/fetch-targets', requireAdmin, async (req, res) => {
+  const found = await fetchGermanTargets();
+  const scannedSet = new Set(listScans().map(s => s.domain));
+  const fresh = found.filter(d => !scannedSet.has(d));
+  const added = addToQueue(fresh);
+  res.json({ added, found: found.length, stats: getQueueStats() });
+});
+
+// Manually add domains to queue
+app.post('/api/admin/add-to-queue', requireAdmin, (req, res) => {
+  const { domains } = req.body || {};
+  if (!Array.isArray(domains) || !domains.length) {
+    return res.status(400).json({ error: 'Provide a non-empty domains array.' });
+  }
+  const scannedSet = new Set(listScans().map(s => s.domain));
+  const fresh = domains.filter(d => typeof d === 'string' && !scannedSet.has(d.trim()));
+  const added = addToQueue(fresh);
+  res.json({ added, stats: getQueueStats() });
+});
 
 app.get('/api/admin/discover', requireAdmin, async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';

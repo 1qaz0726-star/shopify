@@ -2,24 +2,39 @@
 
 const SCANNER_URL = 'https://shopify-0c9l.onrender.com/';
 
-// DOM refs
+// DOM refs — auth
 const loginView    = document.getElementById('login-view');
 const dashView     = document.getElementById('dashboard-view');
 const loginForm    = document.getElementById('login-form');
 const loginError   = document.getElementById('login-error');
 const pwdInput     = document.getElementById('pwd-input');
 const logoutBtn    = document.getElementById('logout-btn');
+
+// DOM refs — pipeline
+const pipelineStatus = document.getElementById('pipeline-status');
+const statTotal      = document.getElementById('stat-total');
+const statDone       = document.getElementById('stat-done');
+const statRemaining  = document.getElementById('stat-remaining');
+const pipelineFill   = document.getElementById('pipeline-fill');
+const fetchBtn       = document.getElementById('fetch-btn');
+const scanStartBtn   = document.getElementById('scan-start-btn');
+const scanStopBtn    = document.getElementById('scan-stop-btn');
+const pipelineNote   = document.getElementById('pipeline-note');
+
+// DOM refs — manual scan + results
 const urlsInput    = document.getElementById('urls-input');
 const scanBtn      = document.getElementById('scan-btn');
 const scanStatus   = document.getElementById('scan-status');
 const resultsBody  = document.getElementById('results-body');
 const emptyState   = document.getElementById('empty-state');
 const resultsCount = document.getElementById('results-count');
-const discoverInput  = document.getElementById('discover-input');
-const discoverBtn    = document.getElementById('discover-btn');
-const discoverList   = document.getElementById('discover-list');
-const discoverNote   = document.getElementById('discover-note');
-const discoverSource = document.getElementById('discover-source');
+const filterToggle = document.getElementById('filter-toggle');
+
+// Pipeline state
+let autoScanRunning = false;
+let stopRequested   = false;
+let filterHighValue = false;
+let currentResults  = [];
 
 // ── API helper ────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -50,8 +65,8 @@ function showLogin() {
 function showDashboard() {
   loginView.hidden = true;
   dashView.hidden  = false;
+  loadQueueStats();
   loadResults();
-  loadDiscover('');
 }
 
 loginForm.addEventListener('submit', async (e) => {
@@ -75,67 +90,105 @@ logoutBtn.addEventListener('click', async () => {
   showLogin();
 });
 
-// ── Discover stores ───────────────────────────────────────────────────────
-async function loadDiscover(q) {
-  discoverBtn.disabled = true;
-  discoverList.innerHTML = '<p style="font-size:0.82rem;color:var(--ink-faint);font-family:var(--mono);margin:0.75rem 0 0">Loading…</p>';
-  discoverNote.hidden = true;
-
+// ── Pipeline ──────────────────────────────────────────────────────────────
+async function loadQueueStats() {
   try {
-    const { data } = await api('GET', `/api/admin/discover?q=${encodeURIComponent(q)}`);
-    const srcLabel = { google: 'via Google Search', ddg: 'via DuckDuckGo', seed: 'curated list' };
-    discoverSource.textContent = srcLabel[data.source] || 'curated list';
-
-    const items = data.domains || [];
-    if (!items.length) {
-      discoverList.innerHTML = '<p style="font-size:0.82rem;color:var(--ink-faint);font-family:var(--mono);margin:0.75rem 0 0">No results found.</p>';
-    } else {
-      discoverList.innerHTML = items.map((item) => {
-        const domain = typeof item === 'string' ? item : item.domain;
-        const niche  = typeof item === 'object' && item.niche ? item.niche : '';
-        return `<div class="discover-item">
-          <div>
-            ${niche ? `<span class="discover-item__niche">${esc(niche)}</span>` : ''}
-            <span class="discover-item__domain">${esc(domain)}</span>
-          </div>
-          <button class="btn-sm btn-sm--pine btn-add-to-scan" data-domain="${esc(domain)}">+ Add</button>
-        </div>`;
-      }).join('');
-    }
-
-    const scannedCount = data.scannedCount || 0;
-    if (data.source === 'ddg') {
-      discoverNote.innerHTML = `Found ${items.length} stores via DuckDuckGo${scannedCount ? ` · ${scannedCount} already-scanned filtered out` : ''}.`;
-      discoverNote.hidden = false;
-    } else if (data.source === 'seed') {
-      discoverNote.innerHTML = `${scannedCount ? `${scannedCount} already-scanned filtered out · ` : ''}DuckDuckGo unavailable — showing curated list. Type a niche keyword to try live search.`;
-      discoverNote.hidden = false;
-    }
-  } catch {
-    discoverList.innerHTML = '<p style="font-size:0.82rem;color:var(--bad);font-family:var(--mono);margin:0.75rem 0 0">Failed to load.</p>';
-  } finally { discoverBtn.disabled = false; }
+    const { data } = await api('GET', '/api/admin/queue-stats');
+    updatePipelineStats(data);
+  } catch {}
 }
 
-discoverBtn.addEventListener('click', () => loadDiscover(discoverInput.value.trim()));
-discoverInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDiscover(discoverInput.value.trim()); });
+function updatePipelineStats(stats) {
+  if (!stats) return;
+  statTotal.textContent     = stats.total ?? '—';
+  statDone.textContent      = stats.done  ?? '—';
+  statRemaining.textContent = stats.pending ?? '—';
+  const pct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+  pipelineFill.style.width = `${pct}%`;
+}
 
-document.querySelector('.discover-presets')?.addEventListener('click', (e) => {
-  const btn = e.target.closest('.btn-preset');
-  if (!btn) return;
-  discoverInput.value = btn.dataset.niche;
-  loadDiscover(btn.dataset.niche);
+function setPipelineStatus(state) {
+  pipelineStatus.className = 'pipeline-status';
+  pipelineStatus.classList.add(`status--${state}`);
+  const labels = { idle: 'Idle', running: 'Scanning…', done: 'Done' };
+  pipelineStatus.textContent = labels[state] || state;
+}
+
+fetchBtn.addEventListener('click', async () => {
+  fetchBtn.disabled    = true;
+  fetchBtn.textContent = 'Fetching…';
+  pipelineNote.textContent = 'Searching DuckDuckGo for German Shopify stores…';
+  try {
+    const { ok, data } = await api('POST', '/api/admin/fetch-targets');
+    if (ok) {
+      pipelineNote.textContent = data.added > 0
+        ? `✓ Added ${data.added} new stores to queue (${data.found} found total).`
+        : `No new stores found (${data.found} found, all already in queue or scanned).`;
+      updatePipelineStats(data.stats);
+    } else {
+      pipelineNote.textContent = 'Fetch failed — check server logs.';
+    }
+  } catch {
+    pipelineNote.textContent = 'Network error during fetch.';
+  } finally {
+    fetchBtn.disabled    = false;
+    fetchBtn.textContent = '🇩🇪 Fetch German stores';
+  }
 });
 
-discoverList.addEventListener('click', (e) => {
-  const btn = e.target.closest('.btn-add-to-scan');
-  if (!btn) return;
-  const domain = btn.dataset.domain;
-  const current = urlsInput.value.trim();
-  if (!current.split('\n').map(l => l.trim()).includes(domain)) {
-    urlsInput.value = current ? current + '\n' + domain : domain;
+scanStartBtn.addEventListener('click', () => {
+  if (autoScanRunning) return;
+  startAutoScan();
+});
+
+scanStopBtn.addEventListener('click', () => {
+  stopRequested = true;
+  pipelineNote.textContent = 'Stopping after current batch…';
+});
+
+async function startAutoScan() {
+  autoScanRunning    = true;
+  stopRequested      = false;
+  scanStartBtn.hidden = true;
+  scanStopBtn.hidden  = false;
+  setPipelineStatus('running');
+
+  while (!stopRequested) {
+    const { ok: bOk, data: bData } = await api('GET', '/api/admin/next-batch?n=25');
+    if (!bOk) { pipelineNote.textContent = 'Failed to fetch next batch.'; break; }
+
+    const domains = bData?.domains || [];
+    if (domains.length === 0) {
+      pipelineNote.textContent = '✓ Queue empty — all stores scanned!';
+      setPipelineStatus('done');
+      break;
+    }
+
+    pipelineNote.textContent = `Scanning ${domains.length} stores…`;
+    const { ok, data } = await api('POST', '/api/admin/bulk-scan', { urls: domains });
+
+    if (ok) {
+      const good = (data.results || []).filter(r => r.ok).length;
+      const bad  = domains.length - good;
+      pipelineNote.textContent = `Batch done: ${good} scanned${bad ? `, ${bad} failed` : ''}.`;
+    }
+
+    await loadQueueStats();
+    await loadResults();
   }
-  btn.textContent = '✓ Added';
-  btn.disabled = true;
+
+  autoScanRunning    = false;
+  scanStartBtn.hidden = false;
+  scanStopBtn.hidden  = true;
+  if (stopRequested) { setPipelineStatus('idle'); pipelineNote.textContent = 'Stopped.'; }
+}
+
+// ── High-value filter ─────────────────────────────────────────────────────
+filterToggle.addEventListener('click', () => {
+  filterHighValue = !filterHighValue;
+  filterToggle.textContent = filterHighValue ? '⚡ High-value only' : 'All stores';
+  filterToggle.classList.toggle('btn-sm--pine', filterHighValue);
+  renderResults(currentResults);
 });
 
 // ── Results ───────────────────────────────────────────────────────────────
@@ -156,11 +209,18 @@ const STATUS_NEXT  = { pending: 'sent', sent: 'replied', replied: 'pending' };
 const SEV_CLASS    = { critical: 'sev--critical', warning: 'sev--warning', good: 'sev--good', info: 'sev--info' };
 
 function renderResults(rows) {
-  resultsCount.textContent = rows.length ? `${rows.length} store${rows.length !== 1 ? 's' : ''}` : '';
-  emptyState.hidden = rows.length > 0;
-  if (!rows.length) { resultsBody.innerHTML = ''; return; }
+  currentResults = rows;
+  const toShow = filterHighValue
+    ? rows.filter(r => (r.score ?? 100) < 65 && (r.trackers || []).length > 0 && !r.has_consent_layer)
+    : rows;
+  resultsCount.textContent = toShow.length
+    ? `${toShow.length}${filterHighValue ? ' high-value' : ''} store${toShow.length !== 1 ? 's' : ''}`
+    : '';
+  emptyState.hidden = toShow.length > 0;
+  if (!toShow.length) { resultsBody.innerHTML = ''; return; }
+  const rows2 = toShow; // rebind for rest of function
 
-  resultsBody.innerHTML = rows.map((row) => {
+  resultsBody.innerHTML = rows2.map((row) => {
     const trackerNames = Array.isArray(row.trackers)
       ? row.trackers.map((t) => t.name || t).filter(Boolean).join(', ') || '—'
       : '—';

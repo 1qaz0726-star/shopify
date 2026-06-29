@@ -4,3 +4,5 @@ npm-debug.log*
 .DS_Store
 consentry-scans.json
 consentry-scans.json.tmp
+scan-queue.json
+scan-queue.json.tmp

@@ -92,35 +92,34 @@
       .card__foot { display: flex; align-items: center; gap: 1rem; margin-top: 0.75rem; }
       .card__note { font-size: 0.82rem; color: var(--ink-soft); font-family: var(--mono); }
 
-      /* ── Discover panel ─────────────────────────────── */
-      .discover-row {
-        display: flex; gap: 0.55rem; align-items: center;
+      /* ── Pipeline ───────────────────────────────────── */
+      .pipeline-stats { display: flex; gap: 2.5rem; margin-bottom: 1.1rem; }
+      .stat-item { display: flex; flex-direction: column; }
+      .stat-num {
+        font-family: var(--mono); font-size: 2rem; font-weight: 500;
+        color: var(--pine); line-height: 1;
       }
-      .discover-input {
-        flex: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
-        padding: 0.5rem 0.85rem; font: 0.88rem "IBM Plex Sans", sans-serif; color: var(--ink);
-        outline: none; transition: border-color 0.15s;
+      .stat-label {
+        font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.12em;
+        text-transform: uppercase; color: var(--ink-faint); margin-top: 0.25rem;
       }
-      .discover-input:focus { border-color: var(--pine); }
-      .discover-input::placeholder { color: var(--ink-faint); }
-
-      .discover-list {
-        display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 0.5rem; margin-top: 1rem;
+      .pipeline-bar {
+        height: 6px; background: var(--paper-2); border-radius: 999px;
+        overflow: hidden; margin-bottom: 1rem; border: 1px solid var(--line);
       }
-      .discover-item {
-        display: flex; align-items: center; justify-content: space-between;
-        background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
-        padding: 0.45rem 0.75rem; font-size: 0.85rem;
+      .pipeline-bar__fill {
+        height: 100%; background: var(--pine); border-radius: 999px;
+        transition: width 0.6s var(--ease);
       }
-      .discover-item__domain { font-family: var(--mono); font-size: 0.82rem; color: var(--ink); }
-      .discover-item__niche  { font-size: 0.72rem; color: var(--ink-faint); margin-right: 0.5rem; }
-      .discover-note {
-        margin-top: 0.8rem; font-size: 0.8rem; color: var(--ink-faint); font-family: var(--mono);
+      .pipeline-status {
+        font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em;
+        text-transform: uppercase; padding: 0.18rem 0.65rem; border-radius: 999px;
       }
-      .discover-note a { color: var(--pine); }
-      .discover-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.65rem; }
-      .btn-preset { font-size: 0.76rem; padding: 0.2rem 0.65rem; }
+      .status--idle    { background: #e8e3d5; color: var(--ink-soft); }
+      .status--running { background: #d1f0de; color: var(--good); }
+      .status--done    { background: #dbeeff; color: #2455a0; }
+      .btn-good { background: var(--good) !important; }
+      .btn-good:hover { background: #1d5238 !important; }
 
       /* ── Buttons ─────────────────────────────────────── */
       .btn-primary {
@@ -257,28 +256,36 @@
           <button id="logout-btn" class="admin-head__logout">Sign out</button>
         </header>
 
-        <!-- Discover stores -->
-        <p class="section-label">Discover stores</p>
+        <!-- Pipeline -->
+        <p class="section-label">掃描流水線</p>
         <div class="card">
           <div class="card__header">
-            <h2 class="card__title">Find targets</h2>
-            <span class="card__hint" id="discover-source"></span>
+            <h2 class="card__title">Auto-pipeline</h2>
+            <span class="pipeline-status status--idle" id="pipeline-status">Idle</span>
           </div>
-          <div class="discover-row">
-            <input id="discover-input" class="discover-input" type="text" placeholder="niche keyword — e.g. beauty, pet, supplements…" />
-            <button id="discover-btn" class="btn-primary">Find stores</button>
+          <div class="pipeline-stats">
+            <div class="stat-item">
+              <span class="stat-num" id="stat-total">—</span>
+              <span class="stat-label">Queue total</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" id="stat-done">—</span>
+              <span class="stat-label">Scanned</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" id="stat-remaining">—</span>
+              <span class="stat-label">Remaining</span>
+            </div>
           </div>
-          <div class="discover-presets">
-            <button class="btn-sm btn-preset" data-niche="pet supplies">Pet supplies</button>
-            <button class="btn-sm btn-preset" data-niche="supplements vitamins">Supplements</button>
-            <button class="btn-sm btn-preset" data-niche="beauty skincare">Beauty</button>
-            <button class="btn-sm btn-preset" data-niche="home decor">Home decor</button>
-            <button class="btn-sm btn-preset" data-niche="apparel fashion">Fashion</button>
-            <button class="btn-sm btn-preset" data-niche="food artisan">Food</button>
-            <button class="btn-sm btn-preset" data-niche="jewelry accessories">Jewelry</button>
+          <div class="pipeline-bar">
+            <div class="pipeline-bar__fill" id="pipeline-fill" style="width:0%"></div>
           </div>
-          <div id="discover-list" class="discover-list"></div>
-          <p id="discover-note" class="discover-note" hidden></p>
+          <div class="card__foot" style="flex-wrap:wrap;gap:0.6rem">
+            <button id="fetch-btn" class="btn-primary">🇩🇪 Fetch German stores</button>
+            <button id="scan-start-btn" class="btn-primary btn-good">▶ Start auto-scan</button>
+            <button id="scan-stop-btn" class="btn-sm" hidden>■ Stop</button>
+            <span id="pipeline-note" class="card__note"></span>
+          </div>
         </div>
 
         <!-- Batch scan -->
@@ -299,7 +306,10 @@
         <div class="results-section">
           <div class="results-header">
             <p class="section-label" style="margin:0">Scan results</p>
-            <span class="results-count" id="results-count"></span>
+            <div style="display:flex;align-items:center;gap:0.75rem">
+              <button id="filter-toggle" class="btn-sm">All stores</button>
+              <span class="results-count" id="results-count"></span>
+            </div>
           </div>
           <div class="tbl-wrap">
             <table>
