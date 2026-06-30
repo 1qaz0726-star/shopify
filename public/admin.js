@@ -281,20 +281,31 @@ function esc(str) {
 }
 
 function buildEmail(domain, score, trackers) {
-  const list = trackers.map((t) => t.name || t).filter(Boolean).join(', ');
-  return [
-    `Subject: Quick compliance check on ${domain}`,
-    '',
-    'Hi,',
-    '',
-    `I built a free GDPR scanner for Shopify stores and tested it on ${domain} — score came back ${score}/100.`,
-    '',
-    list ? `Found: ${list} loading before consent.` : '',
-    '',
-    `Free report: ${SCANNER_URL}`,
-    '',
-    '— paperfox',
-  ].filter((l, i, a) => !(l === '' && a[i - 1] === '')).join('\n').trim();
+  const names = trackers.map((t) => t.name || t).filter(Boolean);
+  const trackerLine = names.length
+    ? names.map((n) => `· ${n}`).join('\n')
+    : '· tracking pixels firing before consent';
+
+  return `Subject: Your store scored ${score}/100 on GDPR — here's what I found
+
+Hi,
+
+I ran a compliance scan on ${domain} and found something worth flagging:
+
+${trackerLine}
+
+These are loading before any consent is collected from visitors.
+Under GDPR, that's a liability — fines can reach 2% of annual revenue.
+
+I'm paperfox, I built the scanner that caught this.
+If you want, I can send you a specific fix checklist for your setup — takes 5 minutes to read, might save you a serious headache.
+
+Interested?
+
+— paperfox
+https://shopify-0c9l.onrender.com
+
+(Reply STOP if you'd rather not hear from me.)`;
 }
 
 async function copyText(text) {
