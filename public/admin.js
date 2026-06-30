@@ -257,6 +257,7 @@ function renderResults(rows) {
         <td class="td-date">${esc(when)}</td>
         <td class="td-status"><span class="status-badge status--${row.email_status}">${STATUS_LABEL[row.email_status] || row.email_status}</span></td>
         <td><div class="td-actions-inner">
+          <a class="btn-sm" href="/report/${esc(row.domain)}" target="_blank" rel="noopener">View report</a>
           <button class="btn-sm btn-sm--pine btn-copy-email"
             data-domain="${esc(row.domain)}"
             data-score="${row.score ?? 0}"
