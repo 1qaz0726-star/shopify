@@ -297,12 +297,12 @@ ${trackerLine}
 These are loading before any consent is collected from visitors.
 Under GDPR, that's a liability — fines can reach 2% of annual revenue.
 
-I'm paperfox, I built the scanner that caught this.
+I'm from Consentry — we built the GDPR scanner that caught this.
 If you want, I can send you a specific fix checklist for your setup — takes 5 minutes to read, might save you a serious headache.
 
 Interested?
 
-— paperfox
+— Consentry
 https://shopify-0c9l.onrender.com
 
 (Reply STOP if you'd rather not hear from me.)`;
