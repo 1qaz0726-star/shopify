@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.disable('x-powered-by');
-resetScanning(); // restore any mid-flight queue items to pending on server restart
+resetScanning().catch(console.error); // restore mid-flight queue items to pending on restart
 // Behind a known proxy/CDN set TRUST_PROXY so req.ip reflects the real client.
 // Accept a hop count ("1"), a boolean ("true"/"false"), or a CIDR/preset list
 // ("loopback", "10.0.0.0/8"). Coerce numeric/boolean strings explicitly —
@@ -216,23 +216,28 @@ app.get('/api/admin/check-auth', (req, res) => {
   res.json({ authed: !!req.session?.adminAuthed });
 });
 
-app.get('/api/admin/results', requireAdmin, (_req, res) => {
-  res.json(listScans());
+app.get('/api/admin/results', requireAdmin, async (_req, res) => {
+  try {
+    res.json(await listScans());
+  } catch (err) {
+    console.error('listScans error:', err);
+    res.status(500).json({ error: 'Failed to load results.' });
+  }
 });
 
-app.post('/api/admin/update-status', requireAdmin, (req, res) => {
+app.post('/api/admin/update-status', requireAdmin, async (req, res) => {
   const { id, status } = req.body || {};
   if (!Number.isInteger(id) || !['pending', 'sent', 'replied'].includes(status)) {
     return res.status(400).json({ error: 'Invalid id or status.' });
   }
-  setEmailStatus(id, status);
+  await setEmailStatus(id, status);
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/scan/:id', requireAdmin, (req, res) => {
+app.delete('/api/admin/scan/:id', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id.' });
-  removeScan(id);
+  await removeScan(id);
   res.json({ ok: true });
 });
 
@@ -247,7 +252,7 @@ async function runBulkScans(urls) {
       chunk.map(async (rawUrl) => {
         const result = await scanStore(rawUrl);
         const domain = new URL(result.finalUrl).hostname;
-        insertScan({
+        await insertScan({
           domain,
           score:           result.score,
           level:           result.level,
@@ -256,7 +261,7 @@ async function runBulkScans(urls) {
           findings:        result.findings,
           hasConsentLayer: result.cmps.length > 0,
         });
-        markDone(rawUrl.replace(/^https?:\/\//i, '').split('/')[0]);
+        await markDone(rawUrl.replace(/^https?:\/\//i, '').split('/')[0]);
         return { domain, score: result.score, ok: true };
       }),
     );
@@ -268,7 +273,7 @@ async function runBulkScans(urls) {
         const raw = chunk[j];
         const domain = raw.replace(/^https?:\/\//i, '').split('/')[0];
         const msg = item.reason instanceof ScanError ? item.reason.message : 'Scan failed.';
-        markDone(domain); // mark failed scans done so queue doesn't retry indefinitely
+        await markDone(domain); // mark failed scans done so queue doesn't retry indefinitely
         results.push({ domain, ok: false, error: msg });
       }
     }
@@ -494,37 +499,36 @@ const SEED_STORES = [
 ];
 
 // Queue stats
-app.get('/api/admin/queue-stats', requireAdmin, (_req, res) => {
-  res.json(getQueueStats());
+app.get('/api/admin/queue-stats', requireAdmin, async (_req, res) => {
+  res.json(await getQueueStats());
 });
 
 // Next batch of unscanned domains
-app.get('/api/admin/next-batch', requireAdmin, (req, res) => {
+app.get('/api/admin/next-batch', requireAdmin, async (req, res) => {
   const n = Math.min(parseInt(req.query.n) || 25, 25);
-  const domains = getNextBatch(n);
-  res.json({ domains, stats: getQueueStats() });
+  const domains = await getNextBatch(n);
+  res.json({ domains, stats: await getQueueStats() });
 });
 
 // Fetch Shopify store targets from Common Crawl CDX API and add to queue
 app.post('/api/admin/fetch-targets', requireAdmin, async (req, res) => {
   const found = await fetchStoreTargets();
-  const scannedSet = new Set(listScans().map((s) => s.domain));
-  const queueSet   = new Set(); // addToQueue handles internal dedup
+  const scannedSet = new Set((await listScans()).map((s) => s.domain));
   const fresh = found.filter((d) => !scannedSet.has(d));
-  const added = addToQueue(fresh);
-  res.json({ added, found: found.length, stats: getQueueStats() });
+  const added = await addToQueue(fresh);
+  res.json({ added, found: found.length, stats: await getQueueStats() });
 });
 
 // Manually add domains to queue
-app.post('/api/admin/add-to-queue', requireAdmin, (req, res) => {
+app.post('/api/admin/add-to-queue', requireAdmin, async (req, res) => {
   const { domains } = req.body || {};
   if (!Array.isArray(domains) || !domains.length) {
     return res.status(400).json({ error: 'Provide a non-empty domains array.' });
   }
-  const scannedSet = new Set(listScans().map(s => s.domain));
-  const fresh = domains.filter(d => typeof d === 'string' && !scannedSet.has(d.trim()));
-  const added = addToQueue(fresh);
-  res.json({ added, stats: getQueueStats() });
+  const scannedSet = new Set((await listScans()).map((s) => s.domain));
+  const fresh = domains.filter((d) => typeof d === 'string' && !scannedSet.has(d.trim()));
+  const added = await addToQueue(fresh);
+  res.json({ added, stats: await getQueueStats() });
 });
 
 app.get('/api/admin/discover', requireAdmin, async (req, res) => {
@@ -532,7 +536,7 @@ app.get('/api/admin/discover', requireAdmin, async (req, res) => {
   const googleKey = process.env.GOOGLE_SEARCH_API_KEY;
   const googleCx  = process.env.GOOGLE_SEARCH_CX;
 
-  const scannedDomains = new Set(listScans().map((s) => s.domain));
+  const scannedDomains = new Set((await listScans()).map((s) => s.domain));
 
   // --- Google Custom Search (if configured) ---
   if (googleKey && googleCx) {
