@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import session from 'express-session';
 import { Resend } from 'resend';
 import { scanStore, ScanError } from './scanner.js';
-import { insertScan, listScans, setEmailStatus, removeScan } from './db.js';
+import { insertScan, listScans, setEmailStatus, removeScan, getScanByDomain } from './db.js';
 import { addToQueue, getNextBatch, markDone, getStats as getQueueStats, resetScanning } from './queue.js';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -582,6 +582,27 @@ app.get('/api/admin/discover', requireAdmin, async (req, res) => {
     hasApiKey:    false,
     scannedCount: scannedDomains.size,
   });
+});
+
+// Public report page — served to store owners via the link in the cold email.
+app.get('/report/:domain', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'report.html'));
+});
+
+// Public report data API — no auth, intentionally public (it's about publicly visible store behaviour).
+app.get('/api/report/:domain', async (req, res) => {
+  const domain = req.params.domain.toLowerCase().replace(/^www\./, '');
+  if (!domain || !domain.includes('.')) {
+    return res.status(400).json({ error: 'Invalid domain.' });
+  }
+  try {
+    const scan = await getScanByDomain(domain);
+    if (!scan) return res.status(404).json({ error: 'Report not found.' });
+    res.json({ ...scan, contactEmail: process.env.NOTIFY_EMAIL || '1qaz0726@gmail.com' });
+  } catch (err) {
+    console.error('Report lookup error:', err);
+    res.status(500).json({ error: 'Failed to load report.' });
+  }
 });
 
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));

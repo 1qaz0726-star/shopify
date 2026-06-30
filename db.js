@@ -50,6 +50,17 @@ export async function setEmailStatus(id, status) {
   if (error) throw error;
 }
 
+export async function getScanByDomain(domain) {
+  const { data, error } = await supabase
+    .from('scans')
+    .select('*')
+    .eq('domain', domain.toLowerCase())
+    .maybeSingle();
+
+  if (error) return null;
+  return data;
+}
+
 export async function removeScan(id) {
   const { error } = await supabase
     .from('scans')
